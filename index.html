@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Formline: parametric car generator</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-sans@5/index.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/geist-mono@5/index.css">
+<script>document.documentElement.dataset.theme = localStorage.getItem('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');</script>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+<style>
+  :root {
+    --bg: #eceef0; --panel: #f7f8f9; --raised: #fff; --ink: #16181b; --ink-2: #5b6168; --ink-3: #7d848c; --line: #dde0e4;
+    --accent: #d9541e; --accent-hover: #c94a17; --accent-ink: #fff; --blue: #3d6fb6; --green: #2f8a5b; --r: 8px;
+    --stage: radial-gradient(120% 90% at 50% 38%, #fbfbfc 0%, #e6e8eb 62%, #d9dce0 100%);
+    color-scheme: light;
+    --sans: 'Geist Sans', ui-sans-serif, system-ui, sans-serif; --mono: 'Geist Mono', ui-monospace, monospace;
+  }
+  [data-theme="dark"] {
+    --bg: #111315; --panel: #17191c; --raised: #202327; --ink: #e6e8eb; --ink-2: #9aa1a9; --ink-3: #6f767e; --line: #2a2e33;
+    --accent: #e0632c; --accent-hover: #ec7240; --blue: #6b9be0; --green: #4fbf86;
+    --stage: radial-gradient(120% 90% at 50% 38%, #2b2f34 0%, #1a1d20 62%, #121416 100%);
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    display: grid; grid-template: 56px 1fr 252px / 1fr 332px; height: 100dvh;
+    font: 13px/1.4 var(--sans); color: var(--ink); background: var(--bg); overflow: hidden;
+  }
+  button, input { font: inherit; color: inherit; }
+
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 20px; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .brand { font-weight: 600; letter-spacing: -0.02em; font-size: 15px; margin-right: 4px; }
+  #presets { display: flex; gap: 2px; padding: 3px; background: var(--bg); border-radius: var(--r); }
+  #presets button { border: 0; background: none; padding: 5px 10px; border-radius: 6px; cursor: pointer; color: var(--ink-2); white-space: nowrap; }
+  #presets button:hover { color: var(--ink); }
+  #presets button[aria-pressed="true"], .tabs button[aria-selected="true"] { background: var(--raised); color: var(--ink); box-shadow: 0 1px 2px rgb(0 0 0 / .1); }
+  .spacer { flex: 1; }
+  .btn { border: 1px solid var(--line); background: var(--panel); padding: 7px 14px; border-radius: var(--r); cursor: pointer; white-space: nowrap; transition: transform .15s cubic-bezier(.16,1,.3,1), background .15s; }
+  .btn:hover { background: var(--raised); }
+  .btn:active { transform: scale(.98); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 500; }
+  .btn.primary:hover { background: var(--accent-hover); }
+
+  #view { position: relative; background: var(--stage); min-height: 0; }
+  #view canvas { display: block; width: 100%; height: 100%; }
+  .overlay { position: absolute; display: flex; gap: 6px; }
+  .views { left: 16px; bottom: 16px; }
+  .toggles { right: 16px; top: 16px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: var(--r); background: color-mix(in srgb, var(--panel) 85%, transparent); border: 1px solid var(--line); backdrop-filter: blur(8px); cursor: pointer; user-select: none; color: var(--ink-2); }
+  .chip:hover { color: var(--ink); }
+  .chip input { accent-color: var(--accent); margin: 0; }
+  .chip.detail input { width: 110px; }
+  .chip.detail output { font: 12px var(--mono); color: var(--ink); min-width: 7ch; text-align: right; }
+
+  .editor-wrap { position: relative; border-top: 1px solid var(--line); background: var(--panel); min-height: 0; }
+  #editor { width: 100%; height: 100%; display: block; touch-action: none; }
+  .editor-bar { position: absolute; left: 12px; right: 16px; top: 8px; display: flex; align-items: center; gap: 16px; pointer-events: none; }
+  .tabs { display: flex; gap: 2px; padding: 3px; background: var(--bg); border-radius: var(--r); pointer-events: auto; }
+  .tabs button { border: 0; background: none; padding: 4px 10px; border-radius: 6px; cursor: pointer; color: var(--ink-2); font-size: 12px; }
+  .tabs button:hover { color: var(--ink); }
+  .legend { display: flex; gap: 14px; color: var(--ink-2); font-size: 12px; }
+  .legend i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 6px; }
+  .ground { stroke: var(--ink-3); opacity: .6; }
+  .body { fill: color-mix(in srgb, var(--ink) 6%, transparent); }
+  .sil { fill: none; stroke: var(--ink); stroke-linejoin: round; }
+  .belt { fill: none; stroke: var(--blue); }
+  .cabin { fill: color-mix(in srgb, var(--blue) 10%, transparent); stroke: var(--blue); }
+  .lbl { fill: var(--ink-2); }
+  .chr { fill: none; stroke: var(--ink-3); }
+  .tire { fill: color-mix(in srgb, var(--ink) 7%, transparent); stroke: var(--ink-3); }
+  .rim { fill: none; stroke: var(--ink-3); opacity: .5; }
+  .h { cursor: grab; fill: var(--panel); transition: r .12s; }
+  .h:hover { fill: var(--raised); }
+  .hp { stroke: var(--accent); }
+  .hb { stroke: var(--blue); }
+  .hc { stroke: var(--ink-3); }
+  .hw { stroke: var(--ink); }
+  .hl { stroke: var(--green); }
+  .pil { stroke: var(--green); }
+
+  aside { grid-row: 2 / 4; grid-column: 2; border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .paint { padding: 14px 16px; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
+  .paint .sw { display: flex; gap: 6px; align-items: center; }
+  .paint .sw button { width: 24px; height: 24px; border-radius: 50%; border: 1px solid color-mix(in srgb, var(--ink) 25%, transparent); cursor: pointer; padding: 0; }
+  .paint .sw input[type=color] { width: 28px; height: 28px; border: 0; padding: 0; background: none; cursor: pointer; }
+  .paint .opts { display: flex; gap: 14px; color: var(--ink-2); }
+  .paint .opts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+  .paint .opts input { accent-color: var(--accent); margin: 0; }
+  #params { overflow-y: auto; flex: 1; padding: 4px 0 24px; }
+  details { border-bottom: 1px solid var(--line); }
+  summary { padding: 12px 16px; font-weight: 600; cursor: pointer; list-style: none; display: flex; justify-content: space-between; }
+  summary::after { content: '+'; color: var(--ink-2); font-weight: 400; }
+  details[open] summary::after { content: '-'; }
+  .row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 4px 16px 8px; }
+  .row .lbl { color: var(--ink-2); }
+  .row output { font: 12px var(--mono); color: var(--ink); }
+  .row input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); margin: 2px 0 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media (max-width: 900px) {
+    body { grid-template: 56px 52vh 200px auto / 1fr; overflow: auto; height: auto; }
+    aside { grid-row: 4; grid-column: 1; border-left: 0; }
+    #presets { overflow-x: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+  <header>
+    <span class="brand">Formline</span>
+    <nav id="presets" aria-label="Body type presets"></nav>
+    <span class="spacer"></span>
+    <button class="btn" id="theme">Dark mode</button>
+    <button class="btn" id="copy">Copy JSON</button>
+    <button class="btn primary" id="random">Generate</button>
+  </header>
+
+  <main id="view">
+    <div class="overlay views">
+      <button class="chip" data-view="front">Front 3/4</button>
+      <button class="chip" data-view="side">Side</button>
+      <button class="chip" data-view="rear">Rear 3/4</button>
+      <button class="chip" data-view="top">Top</button>
+    </div>
+    <div class="overlay toggles">
+      <label class="chip detail">Detail <input type="range" id="detail" min="0" max="1" step="0.01" value="1" aria-label="Polygon detail"><output id="tris"></output></label>
+      <label class="chip"><input type="checkbox" id="zebra">Zebra</label>
+      <label class="chip"><input type="checkbox" id="wire">Mesh</label>
+    </div>
+  </main>
+
+  <section class="editor-wrap" aria-label="Orthographic editors">
+    <div class="editor-bar">
+      <div class="tabs" role="tablist" aria-label="Editor view">
+        <button role="tab" data-tab="side" aria-selected="true">Side</button>
+        <button role="tab" data-tab="top" aria-selected="false">Top</button>
+        <button role="tab" data-tab="sec" aria-selected="false">Front / Rear</button>
+      </div>
+      <div class="legend"></div>
+    </div>
+    <svg id="editor" preserveAspectRatio="xMidYMid meet"></svg>
+  </section>
+
+  <aside>
+    <div class="paint">
+      <div class="sw">
+        <button data-color="#1f3a5f" aria-label="Deep blue"></button>
+        <button data-color="#8f1d1d" aria-label="Red"></button>
+        <button data-color="#d0491f" aria-label="Orange"></button>
+        <button data-color="#2f7d3b" aria-label="Green"></button>
+        <button data-color="#e9e9e6" aria-label="White"></button>
+        <button data-color="#6c7178" aria-label="Grey"></button>
+        <button data-color="#1b1c1e" aria-label="Black"></button>
+        <input type="color" id="color" aria-label="Custom paint">
+      </div>
+      <div class="opts">
+        <label><input type="checkbox" id="gaps">Panel gaps</label>
+        <label><input type="checkbox" id="roof">Contrast roof</label>
+      </div>
+    </div>
+    <div id="params"></div>
+  </aside>
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
