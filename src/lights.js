@@ -16,17 +16,26 @@ const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a
 const unit = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
 const TAU = Math.PI * 2;
 
-export const LAMP_TYPES = ['None', 'Round', 'Projector', 'Slim LED'];
-export const TAIL_TYPES = ['None', 'Twin round', 'Blade', 'Block'];
+export const LAMP_TYPES = ['None', 'Round', 'Projector', 'Slim LED', 'Twin round', 'Halo', 'Triple', 'Light bar'];
+export const TAIL_TYPES = ['None', 'Twin round', 'Blade', 'Block', 'Single round', 'Halo ring', 'Triple round', 'Light bar'];
+export const LIGHT_BAR = 7; // full-width strip, built along the body by lightbar.js instead of as a posed lamp
 const SHAPES = [null,
   { a: 0.095, b: 0.095, n: 2, taper: 0, skew: 0 },
   { a: 0.2, b: 0.062, n: 3.2, taper: -0.4, skew: 0.16 },
   { a: 0.22, b: 0.032, n: 6, taper: -0.25, skew: 0.07 },
+  { a: 0.17, b: 0.079, n: 2.6, taper: 0, skew: 0 },
+  { a: 0.092, b: 0.092, n: 2, taper: 0, skew: 0 },
+  { a: 0.21, b: 0.054, n: 4, taper: -0.1, skew: 0.05 },
+  null,
 ];
 const TAIL_SHAPES = [null,
   { a: 0.17, b: 0.072, n: 2.6, taper: 0, skew: 0 },
   { a: 0.24, b: 0.05, n: 4, taper: 0.35, skew: -0.04 },
   { a: 0.15, b: 0.09, n: 7, taper: 0, skew: 0 },
+  { a: 0.078, b: 0.078, n: 2, taper: 0, skew: 0 },
+  { a: 0.088, b: 0.088, n: 2, taper: 0, skew: 0 },
+  { a: 0.2, b: 0.058, n: 4, taper: 0, skew: 0 },
+  null,
 ];
 
 // outline point at angle th (0 = outboard tip, pi/2 = top), grown by m; the shader's inside test inverts exactly this
@@ -36,7 +45,7 @@ export function outline(S, th, m = 0, n = S.n) {
 }
 
 // ---------- lamp modelling primitives, all in the lamp frame ----------
-const mesh = () => ({ p: [], i: [] });
+export const mesh = () => ({ p: [], i: [] });
 function grid(M, rows, cols, f) {
   const base = M.p.length / 3;
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) M.p.push(...f(r, c));
@@ -45,7 +54,7 @@ function grid(M, rows, cols, f) {
     M.i.push(a, a + cols, b, b, a + cols, b + cols);
   }
 }
-const lathe = (M, cu, cv, prof, segs, phase = 0) => grid(M, prof.length, segs, (r, c) => {
+export const lathe = (M, cu, cv, prof, segs, phase = 0) => grid(M, prof.length, segs, (r, c) => {
   const f = phase + (TAU * c) / segs, [rad, w] = prof[r];
   return [cu + rad * Math.cos(f), cv + rad * Math.sin(f), w];
 });
@@ -107,6 +116,42 @@ const MODELS = [null,
     tube(M.led, arc(S, 0.03 * Math.PI, 0.97 * Math.PI, 0.84, -0.01, q.r * 3), 0.0035, q.s);
     lens(M.lens, S, 1, 0.002, 0.006, q.t, q.r);
   },
+  // twin round: two sealed beams side by side in one housing, each with a chrome trim ring, parabolic bowl and bulb
+  (S, q, M) => {
+    tub(M.housing, S, [[1, 0], [0.97, -0.025], [0.88, -0.08], [0, -0.08]], q.t);
+    for (const [u, r] of [[0.084, 0.066], [-0.084, 0.06]]) {
+      lathe(M.chrome, u, 0, [[r - 0.007, -0.004], [r - 0.003, 0.003], [r + 0.001, 0.003], [r + 0.002, -0.01]], q.t);
+      lathe(M.chrome, u, 0, range(q.r, (t) => { const rr = lerp(r - 0.007, 0.011, t); return [rr, -0.068 + (rr * rr) / 0.075]; }), q.t);
+      lathe(M.led, u, 0, [[0.005, -0.066], [0.008, -0.052], [0.007, -0.042], [0, -0.039]], q.s);
+      lathe(M.chrome, u, 0, [[0, -0.028], [0.01, -0.03], [0.012, -0.036], [0.011, -0.039]], q.s);
+      lathe(M.lens, u, 0, range(q.r * 2, (t) => { const rr = (r - 0.006) * (1 - t); return [rr, 0.001 + 0.011 * (1 - (rr / r) ** 2) + 0.0009 * Math.sin((rr / r) * Math.PI * 7) ** 2]; }), q.t);
+    }
+  },
+  // halo: one round projector in a chrome bowl ringed by an LED light guide (angel eye), indicator crescent on top
+  (S, q, M) => {
+    tub(M.housing, S, [[1, 0], [0.97, -0.02], [0.86, -0.075], [0, -0.075]], q.t);
+    lathe(M.chrome, 0, 0, range(q.r, (t) => { const r = lerp(0.082, 0.04, t); return [r, -0.06 + (r * r) / 0.13]; }), q.t);
+    tube(M.led, ring(0, 0, 0.07, -0.012, q.t), 0.0048, q.s);
+    const R = 0.034 / Math.sin(Math.PI / 3);
+    lathe(M.chrome, 0, 0, [[0.05, -0.05], [0.046, -0.03], [0.04, -0.016], [0.035, -0.014]], q.t);
+    lathe(M.housing, 0, 0, [[0.035, -0.014], [0.033, -0.05]], q.t);
+    lathe(M.glass, 0, 0, range(q.r, (t) => { const g = (Math.PI / 3) * (1 - t); return [R * Math.sin(g), -0.014 + R * (Math.cos(g) - 0.5)]; }), q.t);
+    tube(M.amber, arc(S, 0.3 * Math.PI, 0.7 * Math.PI, 0.9, -0.018, q.r), 0.0035, q.s);
+    lens(M.lens, S, 1, 0.002, 0.014, q.t, q.r);
+  },
+  // triple: three small projectors in a row, each in a chrome shroud, an LED guide under them and an amber tip
+  (S, q, M) => {
+    tub(M.housing, S, [[1, 0], [0.98, -0.02], [0.92, -0.055], [0, -0.055]], q.t);
+    for (const u of [-0.13, 0, 0.13]) {
+      const v = S.skew * u + 0.006, r = 0.028, R = r / Math.sin(Math.PI / 3);
+      lathe(M.chrome, u, v, [[r * 1.42, -0.052], [r * 1.3, -0.032], [r * 1.1, -0.016], [r, -0.014]], q.t);
+      lathe(M.housing, u, v, [[r, -0.014], [r * 0.95, -0.05]], q.t);
+      lathe(M.glass, u, v, range(q.r, (t) => { const g = (Math.PI / 3) * (1 - t); return [R * Math.sin(g), -0.014 + R * (Math.cos(g) - 0.5)]; }), q.t);
+    }
+    tube(M.led, range(q.r * 3, (t) => { const u = lerp(-0.17, 0.17, t); return [u, S.skew * u - 0.042 * (1 + (S.taper * u) / S.a), -0.012]; }), 0.003, q.s);
+    tube(M.amber, arc(S, -0.18 * Math.PI, 0.18 * Math.PI, 0.86, -0.014, q.r), 0.0035, q.s);
+    lens(M.lens, S, 1, 0.002, 0.008, q.t, q.r);
+  },
 ];
 
 const ring = (cu, cv, r, w, n) => Array.from({ length: n + 1 }, (_, i) => [cu + r * Math.cos((TAU * i) / n), cv + r * Math.sin((TAU * i) / n), w]);
@@ -152,6 +197,37 @@ const TAIL_MODELS = [null,
     for (const u of [-0.0475, 0.0475]) tube(M.chrome, range(q.r, (t) => [u, lerp(-0.08, 0.08, t), -0.006]), 0.0018, q.s);
     lens(M.lens, S, 1, 0.002, 0.006, q.t, q.r, 0.0006);
   },
+  // single round: a deep chrome bowl, an LED ring, a red centre and a Fresnel-ringed red dome
+  (S, q, M) => {
+    tub(M.housing, S, [[1, 0], [0.97, -0.02], [0.86, -0.07], [0, -0.07]], q.t);
+    lathe(M.chrome, 0, 0, [[0.07, -0.004], [0.075, 0.002], [0.079, 0.002], [0.08, -0.01]], q.t);
+    lathe(M.chrome, 0, 0, range(q.r, (t) => { const r = lerp(0.07, 0.014, t); return [r, -0.062 + (r * r) / 0.1]; }), q.t);
+    tube(M.red, ring(0, 0, 0.05, -0.016, q.t), 0.0055, q.s);
+    lathe(M.red, 0, 0, [[0.02, -0.036], [0.02, -0.022], [0.015, -0.019], [0, -0.018]], q.s);
+    lathe(M.tint, 0, 0, range(q.r * 2, (t) => { const r = 0.07 * (1 - t); return [r, -0.002 + 0.008 * (1 - (r / 0.07) ** 2) + 0.0008 * Math.sin((r / 0.07) * Math.PI * 7) ** 2]; }), q.t);
+  },
+  // halo ring: two concentric red light guides around a dark, recessed centre with a white reverse dot
+  (S, q, M) => {
+    tub(M.housing, S, [[1, 0], [0.97, -0.02], [0.88, -0.06], [0, -0.06]], q.t);
+    lathe(M.chrome, 0, 0, [[0.078, -0.003], [0.082, 0.002], [0.086, 0.001], [0.087, -0.01]], q.t);
+    tube(M.red, ring(0, 0, 0.066, -0.012, q.t), 0.005, q.s);
+    tube(M.red, ring(0, 0, 0.042, -0.016, q.t), 0.0042, q.s);
+    lathe(M.chrome, 0, 0, [[0.03, -0.024], [0.027, -0.03], [0.012, -0.032], [0, -0.032]], q.t);
+    lathe(M.white, 0, 0, [[0.011, -0.032], [0.011, -0.024], [0.008, -0.021], [0, -0.02]], q.s);
+    lens(M.tint, S, 0.97, 0.001, 0.004, q.t, q.r);
+  },
+  // triple round: three round units in a row, each a chrome ring round a red light guide; the inboard one has reverse
+  (S, q, M) => {
+    tub(M.housing, S, [[1, 0], [0.97, -0.02], [0.9, -0.06], [0, -0.06]], q.t);
+    for (const [u, centre] of [[0.13, M.red], [0, M.red], [-0.13, M.white]]) {
+      lathe(M.chrome, u, 0, [[0.043, -0.003], [0.047, 0.002], [0.05, 0.001], [0.051, -0.01]], q.t);
+      lathe(M.chrome, u, 0, range(q.r, (t) => { const r = lerp(0.043, 0.01, t); return [r, -0.05 + (r * r) / 0.07]; }), q.t);
+      tube(M.red, ring(u, 0, 0.031, -0.014, q.t), 0.0045, q.s);
+      lathe(centre, u, 0, [[0.012, -0.03], [0.012, -0.02], [0.009, -0.017], [0, -0.016]], q.s);
+      lathe(M.tint, u, 0, range(q.r * 2, (t) => { const r = 0.043 * (1 - t); return [r, -0.002 + 0.006 * (1 - (r / 0.043) ** 2)]; }), q.t);
+    }
+    lens(M.lens, S, 1, 0.002, 0.006, q.t, q.r);
+  },
 ];
 
 // ---------- ray casting against the body loft (stations x ring grid), chunked AABBs ----------
@@ -168,11 +244,14 @@ function intersect(o, d, a, b, c) {
 
 // Body mesh access: ray casts plus `surf(ci, cr)`, the mesh as a function of continuous (station, ring) coordinates.
 // Within a grid quad it is exactly the two render triangles; normals interpolate the renderer's vertex normals.
+// `end`: 'front' / 'rear' (strips within FRONT of that end) or an [x0, x1] range; only those strips are searchable.
 export function bodyMesh({ position: p, N, RL, xF, xR }, end = 'front') {
   const G = 8, nc = Math.ceil(RL / G);
-  // lamps live at the ends: only strips within FRONT of that end are searchable (stations are sorted by x)
   let i0 = 0, i1 = N - 1;
-  if (end === 'front') { i1 = 1; while (i1 < N - 1 && p[i1 * RL * 3] < xF + FRONT) i1++; }
+  if (Array.isArray(end)) {
+    while (i0 < N - 2 && p[(i0 + 1) * RL * 3] < end[0]) i0++;
+    i1 = i0 + 1; while (i1 < N - 1 && p[i1 * RL * 3] < end[1]) i1++;
+  } else if (end === 'front') { i1 = 1; while (i1 < N - 1 && p[i1 * RL * 3] < xF + FRONT) i1++; }
   else { i0 = N - 2; while (i0 > 0 && p[i0 * RL * 3] > xR - FRONT) i0--; }
   const NB = i1 - i0;
   const vi = (i, r) => (i * RL + (((r % RL) + RL) % RL)) * 3;
@@ -207,10 +286,17 @@ export function bodyMesh({ position: p, N, RL, xF, xR }, end = 'front') {
     const n = add(add(mul(vnu(i + 1, r + 1), fi + fr - 1), mul(vnu(i, r + 1), 1 - fi)), mul(vnu(i + 1, r), 1 - fr));
     return { p: add(D, add(mul(Ji, fi - 1), mul(Jr, fr - 1))), n: unit(n), Ji, Jr };
   };
-  const cast = (o, d) => {
+  // strip index holding x (stations are sorted by x)
+  const stripAt = (x) => { let lo = i0, hi = i1; while (hi - lo > 1) { const m = (lo + hi) >> 1; if (p[m * RL * 3] <= x) lo = m; else hi = m; } return lo; };
+  // tMax (optional): only hits closer than that count, so only the strips the segment spans in x are searched
+  const cast = (o, d, tMax = Infinity) => {
     const inv = d.map((x) => 1 / x);
-    let bt = Infinity, best = null;
-    for (let b = 0; b < box.length; b += 6) {
+    let bt = tMax, best = null, b0 = 0, b1 = box.length;
+    if (d[0] === 0 || tMax < Infinity) {
+      const xa = o[0] + Math.min(0, d[0] * (tMax < Infinity ? tMax : 0)), xb = o[0] + Math.max(0, d[0] * (tMax < Infinity ? tMax : 0));
+      b0 = Math.max(stripAt(xa) - 1 - i0, 0) * nc * 6; b1 = Math.min(stripAt(xb) + 2 - i0, NB) * nc * 6;
+    }
+    for (let b = b0; b < b1; b += 6) {
       let t0 = 0, t1 = bt;
       for (let a = 0; a < 3; a++) {
         let ta = (box[b + a] - o[a]) * inv[a], tb = (box[b + 3 + a] - o[a]) * inv[a];
@@ -234,22 +320,52 @@ export function bodyMesh({ position: p, N, RL, xF, xR }, end = 'front') {
     const ci = tri.reduce((s, t, k) => s + t[0] * w[k], 0), cr = tri.reduce((s, t, k) => s + t[1] * w[k], 0);
     return { t: bt, p: add(o, mul(d, bt)), n: unit(n), ci, cr };
   };
-  return { cast, surf, N };
+  // walk on the skin in mesh coordinates, parallel-transporting the direction, until `stop(sample)` or the length is used
+  const walk = (ci, cr, dir, len, stop) => {
+    const path = [{ ci, cr, s: 0 }];
+    for (let s = 0, it = 0; s < len - 1e-6 && it < (len / STEP) * 3 + 400; it++) {
+      const A = surf(ci, cr);
+      dir = unit(sub(dir, mul(A.n, dot(dir, A.n))));
+      const d = mul(dir, Math.min(STEP, len - s));
+      const a11 = dot(A.Ji, A.Ji), a12 = dot(A.Ji, A.Jr), a22 = dot(A.Jr, A.Jr), b1 = dot(A.Ji, d), b2 = dot(A.Jr, d), det = a11 * a22 - a12 * a12;
+      if (det < 1e-16) break;
+      // at most half a cell per step: the loft collapses rows near the cut line, where the solve would leap
+      let di = (a22 * b1 - a12 * b2) / det, dr = (a11 * b2 - a12 * b1) / det;
+      const big = Math.max(Math.abs(di), Math.abs(dr)) * 2;
+      if (big > 1) { di /= big; dr /= big; }
+      const ni = ci + di, nr = cr + dr;
+      if (ni < 1 || ni > N - 2) break;
+      const B = surf(ni, nr);
+      if (stop(B)) break;
+      s += Math.hypot(...sub(B.p, A.p)); ci = ni; cr = nr;
+      path.push({ ci, cr, s });
+    }
+    return path;
+  };
+  return { cast, surf, walk, N };
 }
 
-// erode then blur around a closed loop: a smooth curve that never exceeds the input
-function smoothLoop(a, er) {
-  const n = a.length, sig = Math.max(er / 2.5, 1e-3);
-  const m = a.map((_, i) => { let v = Infinity; for (let k = -er; k <= er; k++) v = Math.min(v, a[(i + k + n) % n]); return v; });
+// (station, ring) at arc length s along a walked path
+export const along = (path, s) => {
+  let j = 0;
+  while (j < path.length - 2 && path[j + 1].s < s) j++;
+  const a = path[j], b = path[Math.min(j + 1, path.length - 1)], t = b.s > a.s ? clamp((s - a.s) / (b.s - a.s), 0, 1) : 0;
+  return [lerp(a.ci, b.ci, t), lerp(a.cr, b.cr, t)];
+};
+
+// erode then blur around a closed loop (or an open run): a smooth curve that never exceeds the input
+export function smoothLoop(a, er, open = false) {
+  const n = a.length, sig = Math.max(er / 2.5, 1e-3), at = (i) => a[open ? clamp(i, 0, n - 1) : (i + n) % n];
+  const m = a.map((_, i) => { let v = Infinity; for (let k = -er; k <= er; k++) v = Math.min(v, at(i + k)); return v; });
   return m.map((_, i) => {
     let s = 0, ws = 0;
-    for (let k = -er; k <= er; k++) { const w = Math.exp(-(k * k) / (2 * sig * sig)); s += w * m[(i + k + n) % n]; ws += w; }
+    for (let k = -er; k <= er; k++) { const w = Math.exp(-(k * k) / (2 * sig * sig)); s += w * m[open ? clamp(i + k, 0, n - 1) : (i + k + n) % n]; ws += w; }
     return s / ws;
   });
 }
 
 // right lamp in the car frame, mirrored to the left (z -> -z, winding flipped)
-function mirrored(p, i, nrm) {
+export function mirrored(p, i, nrm) {
   const n = p.length / 3, P = new Float32Array(n * 6), I = new Uint32Array(i.length * 2);
   P.set(p);
   for (let j = 0; j < n; j++) { P[3 * (n + j)] = p[3 * j]; P[3 * (n + j) + 1] = p[3 * j + 1]; P[3 * (n + j) + 2] = -p[3 * j + 2]; }
@@ -276,7 +392,7 @@ function buildLamps(P, body, detail = 1, end = 'front') {
   const S1 = (rear ? TAIL_SHAPES : SHAPES)[Q('Type')];
   if (!S1) return null;
   const k = Q('Size'), S = { ...S1, a: S1.a * k, b: S1.b * k }, m = Q('Blend');
-  const { cast, surf, N } = bodyMesh(body, end);
+  const { cast, surf, walk } = bodyMesh(body, end);
 
   const nT = lod(detail, 12, 128);
   const sw = (Q('Sweep') * Math.PI) / 180, rk = (Q('Rake') * Math.PI) / 180;
@@ -320,36 +436,9 @@ function buildLamps(P, body, detail = 1, end = 'front') {
   }
   const { O, toCar, cols, landed } = pose;
 
-  // walk on the skin in mesh coordinates, parallel-transporting the direction; stops at the centre line, at the
-  // nose tip, and where the skin turns away (rear-facing or underside)
-  const walk = (ci, cr, dir, len) => {
-    const path = [{ ci, cr, s: 0 }];
-    for (let s = 0, it = 0; s < len - 1e-6 && it < (len / STEP) * 3 + 400; it++) {
-      const A = surf(ci, cr);
-      dir = unit(sub(dir, mul(A.n, dot(dir, A.n))));
-      const d = mul(dir, Math.min(STEP, len - s));
-      const a11 = dot(A.Ji, A.Ji), a12 = dot(A.Ji, A.Jr), a22 = dot(A.Jr, A.Jr), b1 = dot(A.Ji, d), b2 = dot(A.Jr, d), det = a11 * a22 - a12 * a12;
-      if (det < 1e-16) break;
-      // at most half a cell per step: the loft collapses rows near the cut line, where the solve would leap
-      let di = (a22 * b1 - a12 * b2) / det, dr = (a11 * b2 - a12 * b1) / det;
-      const big = Math.max(Math.abs(di), Math.abs(dr)) * 2;
-      if (big > 1) { di /= big; dr /= big; }
-      const ni = ci + di, nr = cr + dr;
-      if (ni < 1 || ni > N - 2) break;
-      const B = surf(ni, nr);
-      if (B.p[2] < CLEAR || dot(B.n, F) < -0.2 || B.n[1] < -0.6) break;
-      s += Math.hypot(...sub(B.p, A.p)); ci = ni; cr = nr;
-      path.push({ ci, cr, s });
-    }
-    return path;
-  };
-  const along = (path, s) => {
-    let j = 0;
-    while (j < path.length - 2 && path[j + 1].s < s) j++;
-    const a = path[j], b = path[Math.min(j + 1, path.length - 1)], t = b.s > a.s ? clamp((s - a.s) / (b.s - a.s), 0, 1) : 0;
-    return [lerp(a.ci, b.ci, t), lerp(a.cr, b.cr, t)];
-  };
-  const paths = cols.map((c) => (c.seed ? walk(c.seed.ci, c.seed.cr, c.er, c.len) : null));
+  // skin walk stops at the centre line, at the nose tip, and where the skin turns away (rear-facing or underside)
+  const stopLamp = (B) => B.p[2] < CLEAR || dot(B.n, F) < -0.2 || B.n[1] < -0.6;
+  const paths = cols.map((c) => (c.seed ? walk(c.seed.ci, c.seed.cr, c.er, c.len, stopLamp) : null));
   // columns that had to stop early pull their neighbours in smoothly instead of leaving a notch
   const reach = smoothLoop(cols.map((c, i) => (paths[i] ? paths[i][paths[i].length - 1].s / Math.max(c.len, 1e-6) : 0)), Math.ceil(nT / 16));
 

@@ -1,8 +1,12 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { PRESETS, buildCar, randomCar, clone, sanitize, setPillarCount, sToX, xToS } from './car.js';
+import { PRESETS, buildCar, randomCar, clone, sanitize, setPillarCount, sToX, xToS, PLAN_MIN } from './car.js';
 import { LAMP_TYPES, TAIL_TYPES } from './lights.js';
+import { FENDER_TYPES } from './flares.js';
+import { KIT_TYPES, KIT_SWEEP, KIT_LATHE } from './kit.js';
+import { RIM_TYPES, makeWheel } from './wheels.js';
+import { ROOF_TYPES, ROOF_PARTS } from './roof.js';
 
 let P = sanitize(clone(PRESETS.sedan));
 let detail = 1; // tessellation level, a view setting: 0 = PS1-grade, 1 = full
@@ -44,10 +48,10 @@ scene.add(ground);
 const car = new THREE.Group();
 scene.add(car);
 
-// ---------- paint shader: wheel wells, cladding and panel gaps are flush masks on the body ----------
+// ---------- paint shader: wheel wells and cladding are flush masks on the body ----------
 const HOLE_MAX = 256; // per lamp pair; the texture holds the headlight polygon, then the tail-light polygon
 const U = {
-  uT: { value: new THREE.Vector4() }, uDoor: { value: [0, 1, 2].map(() => new THREE.Vector4()) },
+  uT: { value: new THREE.Vector4() },
   uEnds: { value: new THREE.Vector4() },
   uWheel: { value: new THREE.Vector4() }, uOpt: { value: new THREE.Vector4() }, uMisc: { value: new THREE.Vector4() },
   uZebra: { value: 0 },
@@ -66,7 +70,7 @@ paint.onBeforeCompile = (sh) => {
   sh.fragmentShader = sh.fragmentShader
     .replace('#include <common>', `#include <common>
       varying vec3 vOP; varying vec3 vON; varying float vT; varying float vBelt; varying vec2 vIR;
-      uniform vec4 uT, uEnds, uWheel, uOpt, uMisc; uniform vec4 uDoor[3]; uniform float uZebra;
+      uniform vec4 uT, uEnds, uWheel, uOpt, uMisc; uniform float uZebra;
       uniform sampler2D uHPoly; uniform int uHN, uTN; uniform vec4 uHBox, uTBox; uniform float uRL;
       // even-odd test against a lamp bezel edge, a polygon in the body's (station, ring) coordinates
       bool inPoly(vec2 p, int off, int n, vec4 box) {
@@ -84,7 +88,7 @@ paint.onBeforeCompile = (sh) => {
       float above(float v, float a){ float w = aaw(v); return smoothstep(a - w, a + w, v); }
       float band(float v, float a, float b){ return above(v, a) * (1.0 - above(v, b)); }
       float line(float v, float c, float hw){ float w = aaw(v); return 1.0 - smoothstep(hw - w, hw + w, abs(v - c)); }
-      float archH(float u){ return mix(sqrt(max(1.0 - u * u, 0.0)), min(1.0, (1.0 - u) * 2.2), uMisc.z); }
+      float archH(float u){ return uMisc.z > 0.5 ? min(1.0, (1.0 - u) * 2.2) : sqrt(max(1.0 - u * u, 0.0)); }
       float inArch(float dx, float y, float ra){ float u = abs(dx) / ra; return (1.0 - above(u, 1.0)) * (1.0 - above(y, uWheel.z + ra * archH(min(u, 1.0)))); }
       float inArches(float x, float y, float ra){ return max(inArch(x, y, ra), inArch(x - uWheel.y, y, ra)); }`)
     .replace('#include <color_fragment>', `#include <color_fragment>
@@ -95,21 +99,10 @@ paint.onBeforeCompile = (sh) => {
       float well = inArches(x, y, uWheel.w + 0.004) * (1.0 - above(vT, uT.z));
       float under = smoothstep(-0.25, -0.6, vON.y) * (1.0 - above(vT, 1.5));
       float clad = uOpt.x > 0.001 ? max((inArches(x, y, uWheel.w + uOpt.x) - inArches(x, y, uWheel.w - 0.01)) * (1.0 - above(y, vBelt - 0.08)), 1.0 - above(y, uEnds.w + uOpt.x * 1.5)) : 0.0;
-      // panel gaps
-      float gz = band(y, uEnds.w + 0.06, vBelt + 0.01) * (1.0 - above(vT, uT.x));
-      // door shut lines continue the pillars down to the sill
-      float gx = 0.0, doorEnd = uDoor[0].x;
-      for (int i = 0; i < 3; i++) if (uDoor[i].w > 0.0) {
-        float lx = uDoor[i].x + (y - uDoor[i].y) * uDoor[i].z;
-        gx += line(x - lx, 0.0, 0.0018);
-        doorEnd = max(doorEnd, uDoor[i].x + (uEnds.w + 0.06 - uDoor[i].y) * uDoor[i].z);
-      }
-      float gaps = uOpt.z * clamp(gz * gx + band(x, uDoor[0].x, doorEnd) * line(y, uEnds.w + 0.06, 0.0018) * (1.0 - above(vT, uT.x)), 0.0, 1.0);
 
       float trim = max(well, max(under, clad));
       vec3 col = diffuseColor.rgb;
       col = mix(col, vec3(0.035, 0.04, 0.045), trim);
-      col *= 1.0 - 0.8 * gaps;
       diffuseColor.rgb = col;
       float mPaint = 1.0 - trim;`)
     .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
@@ -146,6 +139,27 @@ const lampMats = {
   // plain transparency (not transmission): the transmission pass only sees opaque objects, so a red lens behind would vanish
   lens: new THREE.MeshPhysicalMaterial({ roughness: 0.02, clearcoat: 1, transparent: true, opacity: 0.12, depthWrite: false, side: THREE.DoubleSide }),
 };
+const flareMats = {
+  plastic: new THREE.MeshStandardMaterial({ color: 0x17181a, roughness: 0.82, metalness: 0 }),
+  bolt: new THREE.MeshStandardMaterial({ color: 0x2b2d30, metalness: 0.7, roughness: 0.42, side: THREE.DoubleSide }),
+  rivet: new THREE.MeshStandardMaterial({ color: 0xd4d7da, metalness: 1, roughness: 0.25, side: THREE.DoubleSide }),
+};
+const kitMats = {
+  plastic: flareMats.plastic,
+  carbon: new THREE.MeshPhysicalMaterial({ color: 0x15171a, metalness: 0.25, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.04 }),
+  metal: new THREE.MeshStandardMaterial({ color: 0xb4b8bd, metalness: 1, roughness: 0.34 }),
+  chrome: lampMats.chrome,
+  bolt: flareMats.bolt,
+  accent: new THREE.MeshStandardMaterial({ color: 0xc4211a, metalness: 0.2, roughness: 0.4, side: THREE.DoubleSide }),
+  dark: new THREE.MeshStandardMaterial({ color: 0x0b0b0c, roughness: 0.9, side: THREE.DoubleSide }),
+};
+const roofMats = {
+  metal: new THREE.MeshStandardMaterial({ color: 0xc3c7cc, metalness: 1, roughness: 0.3 }),
+  plastic: flareMats.plastic, rubber,
+  box: new THREE.MeshPhysicalMaterial({ color: 0x23262a, metalness: 0.1, roughness: 0.35, clearcoat: 1, clearcoatRoughness: 0.08 }),
+  frame: new THREE.MeshStandardMaterial({ color: 0x1c1d1f, metalness: 0.45, roughness: 0.55 }),
+  lens: lampMats.lens, led: lampMats.led, chrome: lampMats.chrome,
+};
 const parts = {};
 // aT given = painted part (paint shader reads aT / aBelt): 1 keeps body-only masks off, 2 also skips the headlight cut
 function setPart(name, data, mat, aT) {
@@ -169,51 +183,6 @@ function setPart(name, data, mat, aT) {
 let body, wheelKey = '', wheelGroup;
 let built;
 
-function makeWheel() {
-  const R = P.wheelR, h = P.tireW / 2, rr = R * P.rimRatio;
-  const dl = detail ** 1.5, seg = (lo, hi) => Math.max(lo, Math.round(lerp(lo, hi, dl)));
-  const g = new THREE.Group();
-  if (detail < 0.25) {
-    // PS1-grade: an octagonal tyre band and a flat rim disc
-    const tire = new THREE.Mesh(new THREE.LatheGeometry([[rr, -h], [R, -h * 0.75], [R, h * 0.75], [rr, h]].map(([a, b]) => new THREE.Vector2(a, b)), 8), rubber);
-    tire.rotation.x = Math.PI / 2;
-    const face = new THREE.Mesh(new THREE.CircleGeometry(rr, 8), rimMat);
-    face.position.z = h * 0.6;
-    g.add(tire, face);
-    g.traverse((o) => { o.castShadow = true; });
-    return g;
-  }
-  const prof = [[rr, -h * 0.9], [lerp(rr, R, 0.5), -h], [R - 0.03, -h * 0.97], [R - 0.006, -h * 0.82], [R, -h * 0.5], [R, h * 0.5],
-    [R - 0.006, h * 0.82], [R - 0.03, h * 0.97], [lerp(rr, R, 0.5), h], [rr, h * 0.9]].map(([a, b]) => new THREE.Vector2(a, b));
-  const tire = new THREE.Mesh(new THREE.LatheGeometry(prof, seg(10, 72)), rubber);
-  tire.rotation.x = Math.PI / 2;
-  const barrel = new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, h * 1.7, seg(8, 48), 1, true), darkMetal);
-  barrel.rotation.x = Math.PI / 2;
-  const disc = new THREE.Mesh(new THREE.CylinderGeometry(rr * 0.78, rr * 0.78, 0.025, seg(8, 40)), darkMetal);
-  disc.rotation.x = Math.PI / 2; disc.position.z = h * 0.15;
-  const cal = new THREE.Mesh(new THREE.BoxGeometry(rr * 0.35, rr * 0.5, 0.06), caliper);
-  cal.position.set(-rr * 0.62, rr * 0.2, h * 0.2);
-
-  // spoked face: disc with sector holes, bevelled extrusion
-  const n = Math.max(3, Math.round(P.spokes)), r1 = rr * 0.36, r2 = rr * 0.86, sw = Math.min(0.012 + 0.06 / n, rr * 0.18);
-  const shape = new THREE.Shape(); shape.absarc(0, 0, rr * 0.97, 0, Math.PI * 2, false);
-  for (let i = 0; i < n; i++) {
-    const a0 = (i / n) * Math.PI * 2, a1 = ((i + 1) / n) * Math.PI * 2, ao = sw / r2, ai = sw / r1;
-    if (a1 - a0 - 2 * ai < 0.05) continue;
-    const hole = new THREE.Path();
-    hole.absarc(0, 0, r2, a0 + ao, a1 - ao, false);
-    hole.absarc(0, 0, r1, a1 - ai, a0 + ai, true);
-    shape.holes.push(hole);
-  }
-  const face = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.02, bevelEnabled: detail > 0.4, bevelThickness: 0.012, bevelSize: 0.008, bevelSegments: detail > 0.7 ? 3 : 1, curveSegments: seg(3, 48) }), rimMat);
-  face.position.z = h * 0.45;
-  const cap = new THREE.Mesh(new THREE.CylinderGeometry(rr * 0.12, rr * 0.14, 0.03, seg(6, 24)), darkMetal);
-  cap.rotation.x = Math.PI / 2; cap.position.z = h * 0.45 + 0.035;
-  g.add(tire, barrel, disc, cal, face, cap);
-  g.traverse((o) => { o.castShadow = true; });
-  return g;
-}
-
 function rebuild() {
   sanitize(P);
   built = buildCar(P, { detail });
@@ -228,11 +197,10 @@ function rebuild() {
   else { body = new THREE.Mesh(geo, paint); body.castShadow = true; car.add(body); }
 
   const m = built.meta;
-  U.uDoor.value.forEach((v, i) => { const l = m.doorLines[i]; if (l) v.set(l[0], l[1], l[2], 1); else v.set(0, 0, 0, 0); });
   U.uT.value.set(m.tSideEnd, m.tTop, m.tBot, 0);
   U.uEnds.value.set(m.xF, m.xR, m.W0, P.clearance);
   U.uWheel.value.set(0, m.wb, m.R, m.Ra);
-  U.uOpt.value.set(P.cladding, P.contrastRoof, P.gaps, P.doors > 3 ? 1 : 0);
+  U.uOpt.value.set(P.cladding, P.contrastRoof, 0, 0);
   U.uMisc.value.set(0, 0, P.archShape, 0);
   paint.color.set(P.color);
   paint.metalness = P.metal; paint.roughness = P.rough;
@@ -257,12 +225,35 @@ function rebuild() {
     for (const k in lampMats) setPart(`lamp_${key}_${k}`, set?.[k], lampMats[k]);
   }
   tex.needsUpdate = true;
+  // full-width light bars: dark housing, emissive core (white front, red rear), clear lens over it
+  for (const [key, bar, coreMat] of [['front', built.bars.front, lampMats.led], ['rear', built.bars.rear, lampMats.red]]) {
+    setPart(`bar_${key}_housing`, bar?.housing, lampMats.housing);
+    setPart(`bar_${key}_core`, bar?.core, coreMat);
+    setPart(`bar_${key}_lens`, bar?.lens, lampMats.lens);
+  }
 
-  const key = [P.wheelR, P.tireW, P.rimRatio, P.spokes, detail].join();
+  // fender flares: painted styles use the body paint (masks off), the pocket style is black plastic; the blend that
+  // joins each part to the body is always paint
+  const fd = built.fenders;
+  setPart('flares', fd?.shell, fd?.paint ? paint : flareMats.plastic, fd?.paint ? 2 : undefined);
+  setPart('flare_blend', fd?.blend, paint, 2);
+  setPart('flare_hw', fd?.hardware, fd?.bright ? flareMats.rivet : flareMats.bolt);
+
+  // body kit: painted parts and the blend use the body paint; trim parts get their own materials
+  const kit = built.kit;
+  setPart('kit_blend', kit?.blend, paint, 2);
+  for (const k of KIT_SWEEP) setPart(`kit_${k}`, kit?.[k], k === 'paint' ? paint : kitMats[k], k === 'paint' ? 2 : undefined);
+  for (const k of KIT_LATHE) setPart(`kit_${k}`, kit?.[k], kitMats[k]);
+
+  // roof attachment: swept parts carry normals, lathed details get computed ones
+  const rack = built.rack;
+  for (const k of ROOF_PARTS) { setPart(`roof_${k}`, rack?.[k], roofMats[k]); setPart(`roof_${k}_l`, rack?.[`${k}_l`], roofMats[k]); }
+
+  const key = [P.wheelR, P.tireW, P.rimRatio, P.spokes, P.rimType, detail].join();
   if (key !== wheelKey) {
     if (wheelGroup) { car.remove(wheelGroup); wheelGroup.traverse((o) => o.geometry?.dispose()); }
     wheelGroup = new THREE.Group();
-    const proto = makeWheel();
+    const proto = makeWheel(THREE, P, detail, { rubber, rim: rimMat, dark: darkMetal, chrome: lampMats.chrome, caliper });
     for (let i = 0; i < 4; i++) { const w = proto.clone(); wheelGroup.add(w); }
     car.add(wheelGroup);
     wheelKey = key;
@@ -410,7 +401,7 @@ const DRAW = {
     for (const ring of [built.cabin.planBase, built.cabin.planRoof]) {
       el('polygon', { points: poly(ring.map((p) => p[0]), ring.map((p) => -p[1])), class: 'cabin', 'stroke-width': 1.5 * K });
     }
-    P.plan.forEach(([s, v], i) => handle(sToX(P, s), -W0 * v, 'hp', 'Body plan width', dragPoint(P.plan, i, (Y) => -Y / W0, 0.4, 1.15)));
+    P.plan.forEach(([s, v], i) => handle(sToX(P, s), -W0 * v, 'hp', 'Body plan width', dragPoint(P.plan, i, (Y) => -Y / W0, PLAN_MIN, 1.15)));
     const cabNames = ['Windshield base', 'Roof front', 'Roof rear', 'Backlight base'];
     P.cabin.forEach((c, i) => handle(sToX(P, P.profile[2 + i][0]), -W0 * c, 'hb', `Cabin width: ${cabNames[i]}`, (X, Y) => { P.cabin[i] = clampN(-Y / W0, 0.3, 1); }));
   },
@@ -459,6 +450,10 @@ function drawEditor() {
   DRAW[tab]();
   legend.innerHTML = LEGEND[tab].map(([c, t]) => `<span><i style="background:${c}"></i>${t}</span>`).join('');
 }
+document.querySelectorAll('[data-panel]').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-panel]').forEach((x) => x.setAttribute('aria-selected', x === b));
+  for (const k in panels) panels[k].hidden = k !== b.dataset.panel;
+}));
 document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
   tab = b.dataset.tab;
   document.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', x === b));
@@ -479,8 +474,7 @@ svg.addEventListener('pointercancel', endDrag);
 
 // ---------- parameter panel ----------
 const SPEC = [
-  ['Wheels', [['wheelR', 'Wheel radius', 0.26, 0.48, 0.005, 'm'], ['tireW', 'Tire width', 0.16, 0.34, 0.005, 'm'], ['rimRatio', 'Rim size', 0.45, 0.82, 0.01],
-    ['spokes', 'Spokes', 3, 12, 1], ['wheelbase', 'Wheelbase', 1.8, 3.6, 0.01, 'm'], ['track', 'Track', 1.3, 1.9, 0.01, 'm'], ['wheelPoke', 'Wheel stick-out', -0.04, 0.12, 0.002, 'm'], ['camber', 'Camber', -12, 6, 0.5, 'deg'], ['archGap', 'Arch gap', 0, 0.12, 0.002, 'm']]],
+  ['Wheels', [['wheelR', 'Wheel radius', 0.26, 0.48, 0.005, 'm'], ['tireW', 'Tire width', 0.16, 0.34, 0.005, 'm'], ['wheelbase', 'Wheelbase', 1.8, 3.6, 0.01, 'm'], ['track', 'Track', 1.3, 1.9, 0.01, 'm'], ['wheelPoke', 'Wheel stick-out', -0.04, 0.12, 0.002, 'm'], ['camber', 'Camber', -12, 6, 0.5, 'deg'], ['archGap', 'Arch gap', 0, 0.12, 0.002, 'm']]],
   ['Chassis', [['overhangF', 'Front overhang', 0.3, 1.8, 0.01, 'm'], ['overhangR', 'Rear overhang', 0.2, 1.8, 0.01, 'm'], ['width', 'Body width', 1.5, 2.2, 0.01, 'm'],
     ['clearance', 'Ground clearance', 0.06, 0.4, 0.005, 'm'], ['chinZ', 'Front lower edge', 0.1, 0.7, 0.01, 'm'], ['tailBotZ', 'Rear lower edge', 0.1, 0.8, 0.01, 'm']]],
   ['Ends', [['planF', 'Nose plan radius', 0.04, 1, 0.01, 'm'], ['planR', 'Tail plan radius', 0.04, 1, 0.01, 'm'], ['noseTaper', 'Nose face taper', 0.5, 3, 0.05],
@@ -488,32 +482,38 @@ const SPEC = [
   ['Surface', [['squareness', 'Section squareness', 2.2, 12, 0.1], ['edgeR', 'Shoulder radius', 0.005, 0.3, 0.005, 'm'], 
     ['bottomR', 'Sill radius', 0.005, 0.25, 0.005, 'm'], ['crown', 'Roof / hood crown', -0.02, 0.12, 0.002, 'm'], ['softness', 'Line softness', 0.002, 0.12, 0.001, 'm']]],
   ['Character', [['tension', 'Line tension', 0, 1, 0.01], ['creaseSharp', 'Crease sharpness', 0, 1, 0.01], ['ledgeSharp', 'Ledge sharpness', 0, 1, 0.01],
-    ['archShape', 'Arch angularity', 0, 1, 0.01], ['ridge', 'Center ridge', 0, 0.06, 0.001, 'm']]],
-  ['Sculpt', [['crease', 'Character crease', 0, 0.03, 0.001, 'm'], ['flare', 'Front fender flare', 0, 0.15, 0.002, 'm'], ['flareR', 'Rear fender flare', 0, 0.15, 0.002, 'm'], ['fenderMelt', 'Fender blend', 1.2, 4, 0.05], ['archLip', 'Arch lip', 0, 0.03, 0.001, 'm'],
+    ['archShape', 'Arch shape', 0, 1, 1], ['ridge', 'Center ridge', 0, 0.06, 0.001, 'm']]],
+  ['Sculpt', [['crease', 'Character crease', 0, 0.03, 0.001, 'm'], ['flare', 'Front fender flare', 0, 0.15, 0.002, 'm'], ['flareR', 'Rear fender flare', 0, 0.15, 0.002, 'm'], ['fenderMelt', 'Fender blend', 1.2, 2.8, 0.05], ['archLip', 'Arch lip', 0, 0.03, 0.001, 'm'],
     ['ledge', 'Shoulder ledge', 0, 0.08, 0.002, 'm'], ['hoodDome', 'Hood dome', 0, 0.06, 0.001, 'm'], ['peakF', 'Front fender peaks', 0, 0.12, 0.002, 'm'], ['peakR', 'Rear fender peaks', 0, 0.12, 0.002, 'm']]],
   ['Greenhouse', [['pillarCount', 'Side pillars', 0, 3, 1], ['pillarFan', 'Pillar fan', 0, 1, 0.01], ['pillarW', 'Side pillar width', 0.05, 0.2, 0.005, 'm'],
-    ['aPillar', 'A-pillar width', 0.06, 0.4, 0.005, 'm'], ['cPillar', 'C-pillar width', 0.07, 1.2, 0.01, 'm'], ['cTaper', 'C-pillar taper', 0.1, 2, 0.01],
-    ['doors', 'Doors', 2, 4, 2]]],
+    ['aPillar', 'A-pillar width', 0.06, 0.4, 0.005, 'm'], ['cPillar', 'C-pillar width', 0.07, 1.2, 0.01, 'm'], ['cTaper', 'C-pillar taper', 0.1, 2, 0.01]]],
   ['Cabin', [['cabinBlend', 'Cockpit blend', 0, 0.08, 0.001, 'm'], ['cabinR', 'Roof rail radius', 0.006, 0.08, 0.001, 'm'], ['roofRound', 'Roof corner roundness', 0.02, 0.95, 0.01], ['baseRound', 'Base corner roundness', 0.02, 0.95, 0.01], ['wsCrown', 'Windshield wrap', 0, 0.2, 0.002, 'm'],
     ['blCrown', 'Backlight wrap', 0, 0.2, 0.002, 'm'], ['glassBulge', 'Glass bulge', 0, 0.06, 0.001, 'm'], ['sideBow', 'Side glass bow', 0, 0.06, 0.001, 'm'],
     ['roofCrown', 'Roof crown', 0, 0.06, 0.001, 'm'], ['roofArch', 'Roof arch', -0.02, 0.08, 0.001, 'm'], ['sillInset', 'Window sill', 0.005, 0.12, 0.001, 'm'],
     ['headerInset', 'Window header', 0.01, 0.15, 0.001, 'm']]],
-  ['Headlights', [['hlType', 'Style', 0, 3, 1], ['hlH', 'Height', 0, 1, 0.01], ['hlZ', 'Spread', 0.3, 0.95, 0.01], ['hlDepth', 'Stand-out', -0.08, 0.1, 0.002, 'm'],
+  ['Rims', [['rimType', 'Style', 0, 4, 1], ['rimRatio', 'Rim size', 0.45, 0.82, 0.01], ['spokes', 'Spokes', 3, 12, 1]]],
+  ['Roof', [['rfType', 'Style', 0, 3, 1], ['rfLen', 'Length', 0.4, 1, 0.01], ['rfWidth', 'Width', 0.5, 1, 0.01], ['rfH', 'Height', 0.04, 0.16, 0.002, 'm']]],
+  ['Headlights', [['hlType', 'Style', 0, 7, 1], ['hlH', 'Height', 0, 1, 0.01], ['hlZ', 'Spread', 0.3, 0.95, 0.01], ['hlDepth', 'Stand-out', -0.08, 0.1, 0.002, 'm'],
     ['hlSize', 'Size', 0.6, 1.6, 0.01], ['hlSweep', 'Sweep', -10, 40, 1, 'deg'], ['hlRake', 'Rake', -10, 35, 1, 'deg'], ['hlAngle', 'Angle (aggression)', -30, 30, 1, 'deg'],
     ['hlBlend', 'Bezel width', 0.02, 0.4, 0.002, 'm'], ['hlRound', 'Bezel roundness', 0, 1, 0.01], ['hlMelt', 'Bezel melt', 0, 1, 0.01],
     ['hlCrown', 'Bezel fullness', -0.03, 0.06, 0.001, 'm']]],
-  ['Tail lights', [['tlType', 'Style', 0, 3, 1], ['tlH', 'Height', 0, 1, 0.01], ['tlZ', 'Spread', 0.3, 0.95, 0.01], ['tlDepth', 'Stand-out', -0.08, 0.1, 0.002, 'm'],
+  ['Tail lights', [['tlType', 'Style', 0, 7, 1], ['tlH', 'Height', 0, 1, 0.01], ['tlZ', 'Spread', 0.3, 0.95, 0.01], ['tlDepth', 'Stand-out', -0.08, 0.1, 0.002, 'm'],
     ['tlSize', 'Size', 0.6, 1.6, 0.01], ['tlSweep', 'Sweep', -10, 40, 1, 'deg'], ['tlRake', 'Rake', -10, 35, 1, 'deg'], ['tlAngle', 'Angle (aggression)', -30, 30, 1, 'deg'],
     ['tlBlend', 'Bezel width', 0.02, 0.4, 0.002, 'm'], ['tlRound', 'Bezel roundness', 0, 1, 0.01], ['tlMelt', 'Bezel melt', 0, 1, 0.01],
     ['tlCrown', 'Bezel fullness', -0.03, 0.06, 0.001, 'm']]],
+  ['Fenders', [['fdType', 'Style', 0, 3, 1], ['fdWidth', 'Width', 0.04, 0.3, 0.002, 'm'], ['fdOut', 'Stand-out', 0.01, 0.15, 0.002, 'm'],
+    ['fdLip', 'Lip overhang', 0, 0.05, 0.001, 'm'], ['fdWrap', 'Wrap down', 0, 1, 0.01], ['fdBlend', 'Blend width', 0.01, 0.15, 0.002, 'm']]],
+  ['Body kit', [['kitF', 'Front bumper', 0, 3, 1], ['kitS', 'Side skirts', 0, 3, 1], ['kitR', 'Rear bumper', 0, 3, 1],
+    ['kitH', 'Height', 0.05, 0.25, 0.002, 'm'], ['kitDrop', 'Drop', 0, 0.08, 0.001, 'm'], ['kitOut', 'Depth', 0.5, 2, 0.01], ['kitBlend', 'Blend width', 0.01, 0.1, 0.002, 'm']]],
   ['Trim', [['cladding', 'Cladding', 0, 0.14, 0.005, 'm']]],
   ['Finish', [['metal', 'Metallic', 0, 1, 0.01], ['rough', 'Roughness', 0.05, 0.8, 0.01]]],
 ];
-const panel = document.getElementById('params');
+const panels = { body: document.getElementById('params'), parts: document.getElementById('parts') };
+const ATTACH = new Set(['Rims', 'Roof', 'Headlights', 'Tail lights', 'Fenders', 'Body kit']);
 const inputs = {};
 for (const [group, rows] of SPEC) {
-  const det = document.createElement('details');
-  det.open = group === 'Tail lights';
+  const det = document.createElement('details'), panel = panels[ATTACH.has(group) ? 'parts' : 'body'];
+  det.open = group === 'Roof';
   det.innerHTML = `<summary>${group}</summary>`;
   for (const [key, label, min, max, step, unit = ''] of rows) {
     const row = document.createElement('label');
@@ -531,10 +531,9 @@ function syncPanel() {
     const { inp, out, unit, step } = inputs[k];
     const v = k === 'pillarCount' ? P.pillars.length : P[k];
     if (document.activeElement !== inp) inp.value = v;
-    out.textContent = k === 'hlType' ? LAMP_TYPES[v] : k === 'tlType' ? TAIL_TYPES[v] : (+v).toFixed(step >= 1 ? 0 : step >= 0.01 ? 2 : 3) + (unit ? ` ${unit}` : '');
+    out.textContent = k === 'hlType' ? LAMP_TYPES[v] : k === 'tlType' ? TAIL_TYPES[v] : k === 'fdType' ? FENDER_TYPES[v] : k === 'rimType' ? RIM_TYPES[v] : k === 'rfType' ? ROOF_TYPES[v] : k === 'archShape' ? ['Round', 'Angular'][v] : ['kitF', 'kitS', 'kitR'].includes(k) ? KIT_TYPES[v] : (+v).toFixed(step >= 1 ? 0 : step >= 0.01 ? 2 : 3) + (unit ? ` ${unit}` : '');
   }
   document.getElementById('color').value = P.color;
-  document.getElementById('gaps').checked = !!P.gaps;
   document.getElementById('roof').checked = !!P.contrastRoof;
 }
 
@@ -554,7 +553,6 @@ document.querySelectorAll('[data-color]').forEach((b) => {
   b.style.background = b.dataset.color;
   b.addEventListener('click', () => { P.color = b.dataset.color; paint.color.set(P.color); syncPanel(); });
 });
-document.getElementById('gaps').addEventListener('change', (e) => { P.gaps = e.target.checked ? 1 : 0; schedule(); });
 document.getElementById('roof').addEventListener('change', (e) => { P.contrastRoof = e.target.checked ? 1 : 0; schedule(); });
 document.getElementById('zebra').addEventListener('change', (e) => { U.uZebra.value = e.target.checked ? 1 : 0; });
 document.getElementById('detail').addEventListener('input', (e) => { detail = +e.target.value; schedule(); });

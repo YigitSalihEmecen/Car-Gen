@@ -120,7 +120,7 @@ const windowOk = (w) => {
 };
 
 /**
- * B: { xA, xRF, xRR, xC, W0, deck(x), deckAt(x, lat), flatW(x), doorEnd, detail }
+ * B: { xA, xRF, xRR, xC, W0, deck(x), deckAt(x, lat), flatW(x), detail }
  * deck(x): body centre-line height; deckAt(x, lat): body top surface height at that lateral position;
  * flatW(x): half width of the body's top surface where it starts rolling over into the side (the shoulder).
  */
@@ -280,10 +280,18 @@ export function buildCabin(P, B) {
   const straight = (sOf) => {
     const [xa, ya] = side.at(sOf(t0), t0), [xb, yb] = side.at(sOf(t1), t1), k = (xb - xa) / (yb - ya || 1e-6);
     return (t) => {
-      // x is linear in the point's real height; height depends a little on x, so settle it in a few passes
-      let s = sAtX(lerp(xa, xb, (t - t0) / (t1 - t0)), t);
-      for (let i = 0; i < 4; i++) s = sAtX(xa + (side.at(s, t)[1] - ya) * k, t);
-      return s;
+      // x is linear in the point's real height, and height depends on x (the deck slopes): solve x = xa + (y(x) - ya) k
+      // by secant steps (a plain fixed-point pass diverges on a steep fastback, where k dy/dx exceeds 1); the candidate
+      // with the smallest residual wins, so a wandering step can never make it worse than the first guess
+      let best = null;
+      const g = (x) => { const s = sAtX(x, t), r = x - xa - (side.at(s, t)[1] - ya) * k; if (!best || Math.abs(r) < best[0]) best = [Math.abs(r), s]; return r; };
+      const lo = Math.min(xa, xb) - 0.3, hi = Math.max(xa, xb) + 0.3;
+      let x0 = lerp(xa, xb, (t - t0) / (t1 - t0)), x1 = x0 + 0.01, g0 = g(x0), g1 = g(x1);
+      for (let i = 0; i < 12 && best[0] > 1e-6 && g1 !== g0; i++) {
+        const x2 = clamp(x1 - (g1 * (x1 - x0)) / (g1 - g0), lo, hi);
+        x0 = x1; g0 = g1; x1 = x2; g1 = g(x1);
+      }
+      return best[1];
     };
   };
   const sA = (t) => uAt(t / Ts, NQ / 2) - uAt(t / Ts, NQ / 4);
@@ -368,12 +376,6 @@ export function buildCabin(P, B) {
   const toXY = (s, t) => { const p = side.at(s, t); return [p[0], p[1]]; };
   const lineOf = (fn) => ts.map((t) => toXY(fn(t), t));
   const pillarLines = pillarFns.map((fn) => lineOf(fn));
-  const worldLine = (pts) => { const [x0, y0] = pts[0], [x1, y1] = pts[pts.length - 1]; return [x0, y0, (x1 - x0) / Math.max(y1 - y0, 1e-3)]; };
-  // door shut lines: front door starts under the A pillar, doors end at side pillars (or ahead of the rear arch)
-  const aBase = toXY(front(t0), t0);
-  const doorLines = [[aBase[0], aBase[1], 0]];
-  const doorEnd = Math.min(B.doorEnd, toXY(rear(t0), t0)[0]);
-  for (let d = 0; d < P.doors / 2; d++) doorLines.push(pillarLines[d] ? worldLine(pillarLines[d]) : [doorEnd, 0, 0]);
 
   // side silhouette: ring fronts up the windshield, the crowned roof centre line, ring backs down the backlight
   const fs = Array.from({ length: 33 }, (_, i) => i / 32);
@@ -403,7 +405,7 @@ export function buildCabin(P, B) {
     wall: wall.out(), roof: roofMesh.out(), glass: glass.out(), gasket: gasket.out(),
     windows: sideWins.length, hasShield: !!shield, hasBacklight: !!backlight,
     profile, planBase: wallRings[0].map(([x, , lat]) => [x, lat]), planRoof: roofRings[JR - 1].map(([x, , lat]) => [x, lat]),
-    doorLines, sectionAt,
+    sectionAt,
     edit: {
       t0, t1, Ts, sAtX, front, rear, pillarAxes, toXY,
       aLine: lineOf(front), cLine: lineOf(rear), pillarLines, slopeF, slopeR, sA, sC,

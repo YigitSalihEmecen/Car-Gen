@@ -127,7 +127,7 @@ console.log('ok cabin glass and windshield line');
   let seed4 = 3;
   const rng4 = () => ((seed4 = (seed4 * 16807) % 2147483647) / 2147483647);
   const cars = [...Object.entries(PRESETS).map(([k, p]) => [k, sanitize(clone(p))]), ...Array.from({ length: 10 }, (_, i) => [`random${i}`, randomCar(rng4)])];
-  for (const [name, base] of cars) for (const type of [1, 2, 3]) for (const end of ['front', 'rear']) {
+  for (const [name, base] of cars) for (const type of [1, 2, 3, 4, 5, 6]) for (const end of ['front', 'rear']) {
     const P = clone(base); P.hlType = type; P.tlType = type;
     const car = buildCar(P), L = end === 'front' ? car.lights : car.tails, B = L.bezel, nT = B.cols, s = B.rows - 1;
     for (const part of ['bezel', 'housing', 'chrome', 'lens', 'led']) assert.ok(L[part].position.every(Number.isFinite), `${name}/${end}/${type}: ${part} not finite`);
@@ -168,3 +168,131 @@ console.log('ok cabin glass and windshield line');
   console.log('ok greenhouse edges straight, pillars above minimum width');
 }
 
+
+// fender flares: every style on every preset (and random bodies) lands on both arches; the painted blend starts exactly
+// on the part's base edge and ends on the skin (no gaps), nothing is left non-finite
+{
+  const { bodyMesh } = await import('../src/lights.js');
+  let seed6 = 23;
+  const rng6 = () => ((seed6 = (seed6 * 16807) % 2147483647) / 2147483647);
+  const cars = [...Object.entries(PRESETS).map(([k, p]) => [k, sanitize(clone(p))]), ...Array.from({ length: 10 }, (_, i) => [`random${i}`, randomCar(rng6)])];
+  for (const [name, base] of cars) for (const type of [1, 2, 3]) {
+    const P = clone(base); P.fdType = type;
+    const car = buildCar(P), F = car.fenders;
+    assert.ok(F.shell && F.blend, `${name}/${type}: no flare`);
+    for (const part of ['shell', 'blend', 'hardware']) if (F[part]) assert.ok(F[part].position.every(Number.isFinite), `${name}/${type}: ${part} not finite`);
+    assert.ok(F.landed > 0.6 * F.cols, `${name}/${type}: only ${F.landed}/${F.cols} arch columns landed`);
+    for (const { part, blend } of F.edge) assert.ok(Math.hypot(...part.map((v, a) => v - blend[a])) < 1e-9, `${name}/${type}: blend detached from the part`);
+    const { cast } = bodyMesh({ position: car.position, N: car.position.length / 3 / car.meta.RL, RL: car.meta.RL, xF: car.meta.xF, xR: car.meta.xR }, [-5, 10]);
+    for (const { p, n } of F.rim) {
+      const h = cast(p.map((v, a) => v + n[a] * 0.02), n.map((v) => -v));
+      assert.ok(h && Math.abs(h.t - 0.02) < 1e-3, `${name}/${type}: blend edge off the skin (${h ? ((h.t - 0.02) * 1000).toFixed(1) + ' mm' : 'no hit'})`);
+    }
+  }
+  console.log('ok fender flares: rigid part, blend lands on the skin');
+}
+
+// body kit: every set on every preset (and random bodies) builds its pieces; the blend starts exactly on each part's top
+// edge and ends on the skin, nothing reaches the ground, nothing is non-finite
+{
+  const { bodyMesh } = await import('../src/lights.js');
+  const { KIT_SWEEP, KIT_LATHE } = await import('../src/kit.js');
+  let seed7 = 29;
+  const rng7 = () => ((seed7 = (seed7 * 16807) % 2147483647) / 2147483647);
+  const cars = [...Object.entries(PRESETS).map(([k, p]) => [k, sanitize(clone(p))]), ...Array.from({ length: 10 }, (_, i) => [`random${i}`, randomCar(rng7)])];
+  for (const [name, base] of cars) for (const type of [1, 2, 3]) {
+    const P = clone(base); P.kitF = P.kitS = P.kitR = type;
+    const car = buildCar(P), K = car.kit;
+    assert.ok(K.pieces >= 2 && K.blend, `${name}/${type}: only ${K.pieces} kit pieces`);
+    for (const part of [...KIT_SWEEP, ...KIT_LATHE, 'blend']) {
+      if (!K[part]) continue;
+      assert.ok(K[part].position.every(Number.isFinite), `${name}/${type}: kit ${part} not finite`);
+      const q = K[part].position, m = car.meta;
+      for (let i = 0; i < q.length; i += 3) {
+        assert.ok(q[i + 1] > 0.02, `${name}/${type}: kit ${part} reaches the ground`);
+        assert.ok(q[i] > m.xF - 0.15 && q[i] < m.xR + 0.15 && Math.abs(q[i + 2]) < m.W0 * 1.2 + 0.1, `${name}/${type}: kit ${part} escapes the car at ${[q[i], q[i + 1], q[i + 2]].map((v) => v.toFixed(2))}`);
+      }
+    }
+    for (const { part, blend } of K.tops) assert.ok(Math.hypot(...part.map((v, a) => v - blend[a])) < 1e-9, `${name}/${type}: kit blend detached from its part`);
+    const { cast } = bodyMesh({ position: car.position, N: car.position.length / 3 / car.meta.RL, RL: car.meta.RL, xF: car.meta.xF, xR: car.meta.xR }, [-5, 10]);
+    for (const { p, n } of K.rim) {
+      // bumper centre points lie on z = 0, the seam between mirrored triangles: the probe ray starts 0.1 mm to one side
+      const h = cast(p.map((v, a) => v + n[a] * 0.02 + (a === 2 ? 1e-4 : 0)), n.map((v) => -v));
+      assert.ok(h && Math.abs(h.t - 0.02) < 1e-3, `${name}/${type}: kit blend edge off the skin (${h ? ((h.t - 0.02) * 1000).toFixed(1) + ' mm' : 'no hit'})`);
+    }
+  }
+  console.log('ok body kit: rigid parts, blend lands on the skin');
+}
+
+// closed mesh: after welding coincident vertices, every edge is shared by exactly two triangles
+function openEdges({ position: p, index: idx }) {
+  const ids = new Map(), vid = (i) => { const k = `${Math.round(p[3 * i] * 2e4)},${Math.round(p[3 * i + 1] * 2e4)},${Math.round(p[3 * i + 2] * 2e4)}`; if (!ids.has(k)) ids.set(k, ids.size); return ids.get(k); };
+  const edges = new Map();
+  for (let f = 0; f < idx.length; f += 3) {
+    const v = [vid(idx[f]), vid(idx[f + 1]), vid(idx[f + 2])];
+    if (v[0] === v[1] || v[1] === v[2] || v[0] === v[2]) continue;
+    for (let k = 0; k < 3; k++) { const a = v[k], b = v[(k + 1) % 3], e = a < b ? `${a}_${b}` : `${b}_${a}`; edges.set(e, (edges.get(e) || 0) + 1); }
+  }
+  let open = 0; for (const c of edges.values()) if (c === 1) open++;
+  return open;
+}
+
+// roof attachments: every style on every preset (and random bodies) stands on the roof; parts are closed and finite,
+// every pad is seated on the roof skin and nothing hangs below it
+{
+  const { ROOF_PARTS } = await import('../src/roof.js');
+  const { KIT_SWEEP } = await import('../src/kit.js');
+  let seed8 = 37;
+  const rng8 = () => ((seed8 = (seed8 * 16807) % 2147483647) / 2147483647);
+  const cars = [...Object.entries(PRESETS).map(([k, p]) => [k, sanitize(clone(p))]), ...Array.from({ length: 8 }, (_, i) => [`random${i}`, randomCar(rng8)])];
+  for (const [name, base] of cars) for (const type of [1, 2, 3]) {
+    const P = clone(base); P.rfType = type; P.kitF = P.kitS = P.kitR = type;
+    const car = buildCar(P), R = car.rack;
+    assert.ok(R, `${name}/${type}: no roof attachment`);
+    let minY = Infinity;
+    for (const k of ROOF_PARTS) for (const part of [R[k], R[`${k}_l`]]) {
+      if (!part) continue;
+      assert.ok(part.position.every(Number.isFinite), `${name}/${type}: roof ${k} not finite`);
+      for (let i = 1; i < part.position.length; i += 3) minY = Math.min(minY, part.position[i]);
+      if (R[k] === part) assert.equal(openEdges(part), 0, `${name}/${type}: roof ${k} is not a closed mesh`);
+    }
+    // pads tilt with the roof crown, so their low corners may sit a little under the foot centre
+    assert.ok(minY > Math.min(...R.feet.map((f) => f.y)) - 0.02, `${name}/${type}: roof part hangs below the feet`);
+    for (const k of KIT_SWEEP) if (car.kit[k]) assert.equal(openEdges(car.kit[k]), 0, `${name}/${type}: kit ${k} is not a closed mesh`);
+  }
+  console.log('ok roof attachments seated and closed; kit parts closed');
+}
+
+// full-width light bars: build on every preset and random body at both ends, closed and finite, within the car's length
+{
+  let seed9 = 43;
+  const rng9 = () => ((seed9 = (seed9 * 16807) % 2147483647) / 2147483647);
+  const cars = [...Object.entries(PRESETS).map(([k, p]) => [k, sanitize(clone(p))]), ...Array.from({ length: 10 }, (_, i) => [`random${i}`, randomCar(rng9)])];
+  for (const [name, base] of cars) {
+    const P = clone(base); P.hlType = 7; P.tlType = 7;
+    const car = buildCar(P), m = car.meta;
+    for (const end of ['front', 'rear']) {
+      const B = car.bars[end];
+      assert.ok(B, `${name}: no ${end} light bar`);
+      for (const part of ['housing', 'core', 'lens']) {
+        const q = B[part].position;
+        assert.ok(q.every(Number.isFinite), `${name}/${end}: light bar ${part} not finite`);
+        assert.equal(openEdges(B[part]), 0, `${name}/${end}: light bar ${part} is not a closed mesh`);
+        for (let i = 0; i < q.length; i += 3) assert.ok(q[i] > m.xF - 0.03 && q[i] < m.xR + 0.03, `${name}/${end}: light bar sticks out of the car`);
+      }
+    }
+  }
+  console.log('ok full-width light bars closed and on the body');
+}
+
+// roof is never shorter than ROOF_MIN; plan width never under PLAN_MIN
+{
+  const { ROOF_MIN, PLAN_MIN, sToX } = await import('../src/car.js');
+  let seed10 = 47;
+  const rng10 = () => ((seed10 = (seed10 * 16807) % 2147483647) / 2147483647);
+  for (const P of [...Object.values(PRESETS).map((p) => sanitize(clone(p))), ...Array.from({ length: 30 }, () => randomCar(rng10))]) {
+    assert.ok(sToX(P, P.profile[4][0]) - sToX(P, P.profile[3][0]) >= ROOF_MIN - 1e-6, 'roof shorter than ROOF_MIN');
+    assert.ok(P.plan.every((p) => p[1] >= PLAN_MIN - 1e-9), 'plan width under PLAN_MIN');
+  }
+  console.log('ok roof length and plan width minimums hold');
+}

@@ -93,7 +93,10 @@
   .paint .opts { display: flex; gap: 14px; color: var(--ink-2); }
   .paint .opts label { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
   .paint .opts input { accent-color: var(--accent); margin: 0; }
-  #params { overflow-y: auto; flex: 1; padding: 4px 0 24px; }
+  .panel-tabs { margin: 12px 16px 4px; align-self: flex-start; }
+  .panel-tabs button { padding: 5px 14px; font-size: 13px; }
+  .params { overflow-y: auto; flex: 1; padding: 4px 0 24px; }
+  .params[hidden] { display: none; }
   details { border-bottom: 1px solid var(--line); }
   summary { padding: 12px 16px; font-weight: 600; cursor: pointer; list-style: none; display: flex; justify-content: space-between; }
   summary::after { content: '+'; color: var(--ink-2); font-weight: 400; }
@@ -161,11 +164,15 @@
         <input type="color" id="color" aria-label="Custom paint">
       </div>
       <div class="opts">
-        <label><input type="checkbox" id="gaps">Panel gaps</label>
         <label><input type="checkbox" id="roof">Contrast roof</label>
       </div>
     </div>
-    <div id="params"></div>
+    <div class="tabs panel-tabs" role="tablist" aria-label="Parameter groups">
+      <button role="tab" data-panel="body" aria-selected="true" aria-controls="params">Body</button>
+      <button role="tab" data-panel="parts" aria-selected="false" aria-controls="parts">Attachments</button>
+    </div>
+    <div id="params" class="params" role="tabpanel"></div>
+    <div id="parts" class="params" role="tabpanel" hidden></div>
   </aside>
   <script type="module" src="src/app.js"></script>
 </body>

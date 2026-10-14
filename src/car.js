@@ -1,6 +1,10 @@
 // Parametric car body. Pure math, no three.js: returns typed arrays.
 import { buildCabin, MIN_A, MIN_PILLAR, MIN_C } from './cabin.js';
-import { buildHeadlights, buildTaillights } from './lights.js';
+import { buildHeadlights, buildTaillights, LIGHT_BAR } from './lights.js';
+import { buildLightBar } from './lightbar.js';
+import { buildFenders } from './flares.js';
+import { buildKit } from './kit.js';
+import { buildRoof } from './roof.js';
 // Frame: x = length (front end at -overhangF, front axle at 0), y = up, z = lateral.
 // Body = loft of cross sections along x. Every driving curve is smooth (PCHIP + gaussian blur),
 // section corners are superellipses (zero curvature where they meet the flats), so the
@@ -20,13 +24,16 @@ export const PRESETS = {
     planF: 0.5, planR: 0.38, noseR: 0.14, tailR: 0.1, noseTaper: 1.5, tailTaper: 1.2,
     squareness: 3.2, edgeR: 0.1, cabinR: 0.03, bottomR: 0.09, crown: 0.035, softness: 0.035,
     crease: 0.008, flare: 0.02, flareR: 0.02, fenderMelt: 2.4, archLip: 0.008, ledge: 0.03, hoodDome: 0.01, peakF: 0.0, peakR: 0.0,
-    pillars: [[0.47, 0]], pillarFan: 0.15, pillarW: 0.08, aPillar: 0.09, cPillar: 0.3, cTaper: 0.55, doors: 4, cabinBlend: 0.025,
+    pillars: [[0.47, 0]], pillarFan: 0.15, pillarW: 0.08, aPillar: 0.09, cPillar: 0.3, cTaper: 0.55, cabinBlend: 0.025,
     baseRound: 0.5, roofRound: 0.35, wsCrown: 0.06, blCrown: 0.05, glassBulge: 0.015, sideBow: 0.012, roofCrown: 0.025, roofArch: 0.02, sillInset: 0.035, headerInset: 0.055,
     tension: 0.15, creaseSharp: 0.3, ledgeSharp: 0.3, archShape: 0, ridge: 0,
     hlType: 2, hlH: 0.72, hlZ: 0.64, hlDepth: 0, hlSize: 1, hlSweep: 20, hlRake: 15, hlAngle: 0,
     hlBlend: 0.12, hlRound: 0.6, hlMelt: 0.6, hlCrown: 0,
     tlType: 2, tlH: 0.68, tlZ: 0.66, tlDepth: 0, tlSize: 1, tlSweep: 15, tlRake: 10, tlAngle: 0, tlBlend: 0.1, tlRound: 0.6, tlMelt: 0.6, tlCrown: 0,
-    cladding: 0, gaps: 1, contrastRoof: 0, metal: 0.45, rough: 0.32, color: '#1f3a5f',
+    fdType: 0, fdWidth: 0.1, fdOut: 0.04, fdLip: 0.012, fdWrap: 0.6, fdBlend: 0.035,
+    rimType: 0, rfType: 0, rfLen: 0.8, rfWidth: 0.85, rfH: 0.07,
+    kitF: 0, kitS: 0, kitR: 0, kitH: 0.1, kitDrop: 0.02, kitOut: 1, kitBlend: 0.03,
+    cladding: 0, contrastRoof: 0, metal: 0.45, rough: 0.32, color: '#1f3a5f',
     profile: [[-1, 0.72], [-0.72, 0.84], [0.3, 0.99], [0.56, 1.43], [0.84, 1.44], [1.13, 1.06], [1.85, 1.02], [2, 0.95]],
     belt: [[-0.7, 0.86], [0.6, 0.98], [1.8, 1.03]],
     chr: [[-0.9, 0.72], [0.5, 0.79], [1.9, 0.86]],
@@ -50,7 +57,7 @@ export const PRESETS = {
   coupe: {
     wheelR: 0.345, tireW: 0.265, wheelbase: 2.62, track: 1.6, overhangF: 0.98, overhangR: 0.86, width: 1.9,
     clearance: 0.12, chinZ: 0.22, tailBotZ: 0.36, planF: 0.55, planR: 0.4, noseR: 0.12, tailR: 0.1, noseTaper: 1.7,
-    crown: 0.04, flare: 0.045, crease: 0.01, doors: 2, pillars: [[0.66, 0.12]], cPillar: 0.16, flareR: 0.055, creaseSharp: 0.6, peakF: 0.03, hoodDome: 0.015,
+    crown: 0.04, flare: 0.045, crease: 0.01, pillars: [[0.66, 0.12]], cPillar: 0.16, flareR: 0.055, creaseSharp: 0.6, peakF: 0.03, hoodDome: 0.015,
     color: '#2f7d3b', spokes: 10, rimRatio: 0.72,
     profile: [[-1, 0.56], [-0.7, 0.68], [0.36, 0.86], [0.64, 1.25], [0.86, 1.26], [1.28, 0.96], [1.85, 0.93], [2, 0.86]],
     belt: [[-0.7, 0.72], [0.5, 0.88], [1.8, 0.95]],
@@ -64,7 +71,7 @@ export const PRESETS = {
   supercar: {
     wheelR: 0.35, tireW: 0.3, wheelbase: 2.7, track: 1.68, overhangF: 1.02, overhangR: 0.92, width: 2.03,
     clearance: 0.1, chinZ: 0.14, tailBotZ: 0.3, planF: 0.6, planR: 0.45, noseR: 0.08, tailR: 0.1, noseTaper: 2.0, tailTaper: 1.0,
-    squareness: 3.6, crown: 0.03, flare: 0.07, flareR: 0.1, fenderMelt: 2.8, crease: 0.012, ledge: 0.02, doors: 2, peakF: 0.05, peakR: 0.04,
+    squareness: 3.6, crown: 0.03, flare: 0.07, flareR: 0.1, fenderMelt: 2.8, crease: 0.012, ledge: 0.02, peakF: 0.05, peakR: 0.04,
     pillars: [], cPillar: 0.1, cTaper: 0.45, baseRound: 0.65, roofRound: 0.55, wsCrown: 0.12, blCrown: 0.08, glassBulge: 0.03, sideBow: 0.03, cabinR: 0.025, tension: 0.35, creaseSharp: 0.85, ledgeSharp: 0.6, archShape: 0.65, color: '#d0491f', spokes: 7, rimRatio: 0.74, metal: 0.25,
     profile: [[-1, 0.42], [-0.65, 0.62], [0.2, 0.8], [0.46, 1.13], [0.6, 1.14], [1.06, 0.98], [1.8, 0.96], [2, 0.9]],
     belt: [[-0.6, 0.66], [0.3, 0.76], [1.6, 0.96]],
@@ -79,7 +86,7 @@ export const PRESETS = {
   muscle: {
     wheelR: 0.34, tireW: 0.255, wheelbase: 2.75, track: 1.56, overhangF: 1.08, overhangR: 0.98, width: 1.84,
     clearance: 0.14, chinZ: 0.3, tailBotZ: 0.4, planF: 0.32, planR: 0.24, noseR: 0.06, tailR: 0.05, noseTaper: 1.1, tailTaper: 1.0,
-    squareness: 4.5, edgeR: 0.06, cabinR: 0.022, baseRound: 0.45, roofRound: 0.3, crease: 0.014, flare: 0.04, flareR: 0.06, doors: 2, hoodDome: 0.03,
+    squareness: 4.5, edgeR: 0.06, cabinR: 0.022, baseRound: 0.45, roofRound: 0.3, crease: 0.014, flare: 0.04, flareR: 0.06, hoodDome: 0.03,
     pillars: [[0.8, 0.3]], cPillar: 0.22, tension: 0.5, creaseSharp: 0.9, ledgeSharp: 0.7, color: '#8f1d1d', spokes: 5, metal: 0.2,
     profile: [[-1, 0.78], [-0.72, 0.86], [0.42, 0.92], [0.62, 1.3], [0.76, 1.31], [1.36, 0.98], [1.9, 0.98], [2, 0.93]],
     belt: [[-0.7, 0.88], [0.5, 0.92], [1.8, 1.0]],
@@ -116,6 +123,7 @@ export const PRESETS = {
     hlSize: 1.1, hlSweep: 22,
   },
   offroad: {
+    fdType: 1, fdWidth: 0.11, fdOut: 0.045,
     wheelR: 0.4, tireW: 0.28, rimRatio: 0.52, spokes: 6, wheelbase: 2.5, track: 1.62, archGap: 0.06,
     overhangF: 0.72, overhangR: 0.78, width: 1.9, clearance: 0.3, chinZ: 0.52, tailBotZ: 0.52,
     planF: 0.2, planR: 0.16, noseR: 0.06, tailR: 0.05, noseTaper: 1.0, tailTaper: 1.0, squareness: 6, edgeR: 0.05, cabinR: 0.018, bottomR: 0.05, baseRound: 0.18, roofRound: 0.12, wsCrown: 0.01, blCrown: 0, glassBulge: 0, sideBow: 0, roofCrown: 0.008, roofArch: 0,
@@ -134,7 +142,7 @@ export const PRESETS = {
   rally: {
     wheelR: 0.33, tireW: 0.25, wheelbase: 2.5, track: 1.62, overhangF: 0.8, overhangR: 0.6, width: 1.88,
     clearance: 0.17, chinZ: 0.24, tailBotZ: 0.4, planF: 0.4, planR: 0.28, noseR: 0.1, tailR: 0.07,
-    flare: 0.1, flareR: 0.1, fenderMelt: 2.0, archLip: 0.02, cabinR: 0.03, crease: 0.012, doors: 2, pillars: [[0.48, 0]], peakF: 0.02, cPillar: 0.3,
+    flare: 0.1, flareR: 0.1, fenderMelt: 2.0, archLip: 0.02, cabinR: 0.03, crease: 0.012, pillars: [[0.48, 0]], peakF: 0.02, cPillar: 0.3,
     contrastRoof: 1, color: '#e3e4e2', spokes: 10, rimRatio: 0.62, metal: 0.1, rough: 0.28,
     profile: [[-1, 0.66], [-0.6, 0.8], [0.27, 0.97], [0.6, 1.42], [1.1, 1.42], [1.78, 1.04], [1.94, 1.0], [2, 0.93]],
     belt: [[-0.6, 0.86], [0.6, 0.98], [1.8, 1.08]],
@@ -149,7 +157,7 @@ export const PRESETS = {
     squareness: 7, edgeR: 0.018, cabinR: 0.012, bottomR: 0.03, crown: 0.0, softness: 0.008, tension: 1,
     baseRound: 0.2, roofRound: 0.15, wsCrown: 0.02, blCrown: 0.01, glassBulge: 0, sideBow: 0, roofCrown: 0.006, roofArch: 0,
     crease: 0.014, creaseSharp: 1, flare: 0.0, flareR: 0.0, archLip: 0.0, archShape: 1, ledge: 0.028, ledgeSharp: 1, ridge: 0.025,
-    hoodDome: 0, peakF: 0, peakR: 0, doors: 2, pillars: [[0.72, 0.35]], aPillar: 0.07, cPillar: 0.08, cTaper: 0.5,
+    hoodDome: 0, peakF: 0, peakR: 0, pillars: [[0.72, 0.35]], aPillar: 0.07, cPillar: 0.08, cTaper: 0.5,
     color: '#d9a51a', metal: 0.2, rough: 0.3,
     profile: [[-1, 0.5], [-0.9, 0.56], [0.1, 0.78], [0.42, 1.08], [0.62, 1.09], [1.15, 0.9], [1.85, 0.9], [2, 0.86]],
     belt: [[-0.8, 0.6], [0.3, 0.76], [1.8, 0.86]],
@@ -202,8 +210,9 @@ function polyline(pts) {
   };
 }
 
-// archH(u): arch height fraction at |dx| = u * Ra. shape 0 = round, 1 = hexagonal (flat top, straight flanks)
-export const archH = (u, shape) => lerp(Math.sqrt(Math.max(0, 1 - u * u)), Math.min(1, (1 - u) * 2.2), shape);
+// archH(u): arch height fraction at |dx| = u * Ra. shape 0 = a true circle, 1 = three straight lines (flat top, two
+// slanted flanks); nothing in between, a blend of the two reads as a lumpy, accidental arch
+export const archH = (u, shape) => (shape >= 0.5 ? Math.min(1, (1 - u) * 2.2) : Math.sqrt(Math.max(0, 1 - u * u)));
 
 function blur(a, sigma) {
   const r = Math.ceil(sigma * 3); if (r < 1) return a;
@@ -213,15 +222,17 @@ function blur(a, sigma) {
   for (let j = 0; j < n; j++) { let s = 0; for (let i = -r; i <= r; i++) s += a[clamp(j + i, 0, n - 1)] * k[i + r]; out[j] = s / ks; }
   return out;
 }
-function dilate(a, r) {
-  const out = new Float64Array(a.length);
-  for (let j = 0; j < a.length; j++) { let m = 0; for (let i = Math.max(0, j - r); i <= Math.min(a.length - 1, j + r); i++) m = Math.max(m, a[i]); out[j] = m; }
-  return out;
-}
+
+// fender rise across the top: part of it lifts the whole hood, the rest ramps in smoothly toward the shoulder (a ramp
+// over only the outer part of the hood read as a ridge pinched up along the fender line, with a valley between)
+const riseLat = (u) => 0.4 + 0.6 * u * u * (3 - 2 * u);
+// steepest slope of a smootherstep hill 1 - S((d / hw)^2), times its half width
+const HILL_SLOPE = 2.73;
 
 // arch flank roll as a fraction of the section's bottom radius: the lip rolls as softly down the flanks as over the top
 const ARCH_ROLL = 0.6;
 
+export const PLAN_MIN = 0.72, ROOF_MIN = 0.5;
 export function sToX(P, s) { return s < 0 ? s * P.overhangF : s <= 1 ? s * P.wheelbase : P.wheelbase + (s - 1) * P.overhangR; }
 export function xToS(P, x) { return x < 0 ? x / P.overhangF : x <= P.wheelbase ? x / P.wheelbase : 1 + (x - P.wheelbase) / P.overhangR; }
 
@@ -238,7 +249,16 @@ export function sanitize(P) {
   fix(P.belt, -1, 2, 0.05); fix(P.chr, -1, 2, 0.05);
   P.plan[0][0] = -1; P.plan[P.plan.length - 1][0] = 2;
   fix(P.plan, -1, 2, 0.08);
-  for (const p of P.plan) p[1] = clamp(p[1], 0.4, 1.15);
+  for (const p of P.plan) p[1] = clamp(p[1], PLAN_MIN, 1.15);
+  P.fenderMelt = clamp(P.fenderMelt, 1.2, 2.8);
+  P.archShape = P.archShape >= 0.5 ? 1 : 0;
+  // the roof is never shorter than the wedge's (0.5 m): a shorter one pinches the greenhouse into artifacts. It grows
+  // rearward into the backlight, then forward if the backlight has no room left
+  const sx = (i) => sToX(P, pr[i][0]);
+  if (sx(4) - sx(3) < ROOF_MIN) {
+    pr[4][0] = Math.min(xToS(P, sx(3) + ROOF_MIN), pr[5][0] - 0.03);
+    if (sx(4) - sx(3) < ROOF_MIN) pr[3][0] = Math.max(xToS(P, sx(4) - ROOF_MIN), pr[2][0] + 0.03);
+  }
   P.cabin = P.cabin.map((c) => clamp(c, 0.3, 1));
   for (const sec of [P.secF, P.secR]) {
     const b = sec.body;
@@ -247,12 +267,18 @@ export function sanitize(P) {
     for (const p of b) p[1] = clamp(p[1], -0.06, 0.25);
     sec.glass = [clamp(sec.glass[0], 0.15, 0.85), clamp(sec.glass[1], 0.05, 0.95)];
   }
-  P.doors = P.doors >= 3 ? 4 : 2;
   P.aPillar = Math.max(P.aPillar, MIN_A); P.pillarW = Math.max(P.pillarW, MIN_PILLAR); P.cPillar = Math.max(P.cPillar, MIN_C);
-  P.hlType = clamp(Math.round(P.hlType), 0, 3);
+  P.hlType = clamp(Math.round(P.hlType), 0, 7);
   P.hlSweep = clamp(P.hlSweep, -10, 40); P.hlRake = clamp(P.hlRake, -10, 35); P.hlAngle = clamp(P.hlAngle, -30, 30);
-  P.tlType = clamp(Math.round(P.tlType), 0, 3);
+  P.tlType = clamp(Math.round(P.tlType), 0, 7);
   P.tlSweep = clamp(P.tlSweep, -10, 40); P.tlRake = clamp(P.tlRake, -10, 35); P.tlAngle = clamp(P.tlAngle, -30, 30);
+  P.fdType = clamp(Math.round(P.fdType ?? 0), 0, 3);
+  P.fdWidth = clamp(P.fdWidth ?? 0.1, 0.04, 0.3); P.fdOut = clamp(P.fdOut ?? 0.04, 0.01, 0.15); P.fdLip = clamp(P.fdLip ?? 0.012, 0, 0.05); P.fdWrap = clamp(P.fdWrap ?? 0.6, 0, 1);
+  P.fdBlend = clamp(P.fdBlend ?? 0.035, 0.01, 0.15);
+  for (const k of ['kitF', 'kitS', 'kitR']) P[k] = clamp(Math.round(P[k] ?? 0), 0, 3);
+  P.rimType = clamp(Math.round(P.rimType ?? 0), 0, 4); P.rfType = clamp(Math.round(P.rfType ?? 0), 0, 3);
+  P.rfLen = clamp(P.rfLen ?? 0.8, 0.4, 1); P.rfWidth = clamp(P.rfWidth ?? 0.85, 0.5, 1); P.rfH = clamp(P.rfH ?? 0.07, 0.04, 0.16);
+  P.kitH = clamp(P.kitH ?? 0.1, 0.05, 0.25); P.kitDrop = clamp(P.kitDrop ?? 0.02, 0, 0.08); P.kitOut = clamp(P.kitOut ?? 1, 0.5, 2); P.kitBlend = clamp(P.kitBlend ?? 0.03, 0.01, 0.1);
   P.pillars = P.pillars.slice(0, 3).sort((a, b) => a[0] - b[0]);
   P.pillars.forEach((p, i) => { p[0] = clamp(p[0], 0.08 + i * 0.12, 0.92 - (P.pillars.length - 1 - i) * 0.12); p[1] = clamp(p[1], -0.6, 0.8); });
   return P;
@@ -323,29 +349,90 @@ export function buildCar(P, opts = {}) {
     arch[j] = a;
     need[j] = a > 0 ? Math.max(0, a + 0.03 - (top[j] - P.crown - P.edgeR * 0.5)) : 0;
   }
-  const rise = blur(dilate(need, Math.round((0.08 + 0.04 * P.fenderMelt) / dx)), (0.04 + 0.05 * P.fenderMelt) / dx);
-  for (let j = 0; j < M; j++) rise[j] += P.peakF * hoodWin[j] + P.peakR * deckWin[j];
+  // the rise is the upper envelope of smooth hills, one per sample that needs height: a round, G2 fender crown. Each
+  // hill is as wide as its height demands, so the climb never exceeds RISE_SLOPE: a tall lift spreads over the hood and
+  // cowl instead of being pinched up over the wheel
+  const RISE_SLOPE = 0.5, rise = new Float64Array(M), hw0 = (0.22 + 0.12 * P.fenderMelt) / dx;
+  for (let j = 0; j < M; j++) if (need[j] > 0) {
+    const hw = Math.max(hw0, (HILL_SLOPE * need[j]) / RISE_SLOPE / dx);
+    for (let i = Math.max(0, Math.floor(j - hw)); i <= Math.min(M - 1, Math.ceil(j + hw)); i++) {
+      const e = ((i - j) / hw) ** 2;
+      if (e < 1) rise[i] = Math.max(rise[i], need[j] * (1 - e * e * e * (e * (6 * e - 15) + 10)));
+    }
+  }
+  // designed fender peaks: the same kind of hill, centred on each wheel (a hood-length window ended in a fold at the
+  // windshield base and another at the nose)
+  const hwP = Ra * (1.6 + 0.5 * P.fenderMelt), hill = (d) => { const e = (d / hwP) ** 2; return e >= 1 ? 0 : 1 - e * e * e * (e * (6 * e - 15) + 10); };
+  for (let j = 0; j < M; j++) rise[j] += P.peakF * hill(X[j]) + P.peakR * hill(X[j] - wb);
   // the arch lifts the section floor, so over the top its edge rolls with the section's bottom radius; on the steep
   // flanks only an x-blur of the lift can roll it, otherwise the lip turns into a crisp vertical edge (a streak in reflections)
   const cut = blur(Float64Array.from(bot, (b, j) => Math.max(0, arch[j] - b)), ARCH_ROLL * Math.max(P.bottomR, 0.03) / dx).map((l, j) => bot[j] + l);
   // a widely blurred floor line: features that would run into an arch (the character crease) taper out ahead of it and
   // come back after it, instead of tracing the arch edge down its slopes row by row (a staircase in reflections)
   const cutWide = blur(cut, 0.1 / dx);
+  // the same line dilated before blurring: never below the real cut, and smooth, so features above an arch fade out
+  // gradually ahead of and behind it (the sharp cut switched them off at the arch flank: a vertical seam down the side)
+  const cutSoft = (() => { const r = Math.round(0.12 / dx), d = Float64Array.from(cut, (_, j) => { let m = -Infinity; for (let i = Math.max(0, j - r); i <= Math.min(M - 1, j + r); i++) m = Math.max(m, cut[i]); return m; }); return blur(d, 0.08 / dx); })();
+  // corner budget: over an arch the side may be shorter than the shoulder radius plus the arch roll. Rather than slice
+  // the arch top flat (a rectangular arch, and a side wall collapsed to nothing, which crumples everything sitting on
+  // it), both radii shrink there, smoothly along x, leaving at least SIDE_MIN of real side wall
+  const SIDE_MIN = 0.03;
+  const cornerK = blur(Float64Array.from(X, (_, j) => {
+    const zsj = top[j] + rise[j] - P.crown - P.ridge * (hoodWin[j] + deckWin[j]), hj = Math.max(zsj - bot[j], 0.05);
+    const want = Math.min(P.edgeR, 0.35 * hj) + Math.min(P.bottomR, 0.25 * hj);
+    return clamp((zsj - cut[j] - SIDE_MIN) / Math.max(want, 1e-4), 0.12, 1);
+  }).map((v, j, a) => { const r = Math.round(0.15 / dx); let m = v; for (let i = Math.max(0, j - r); i <= Math.min(M - 1, j + r); i++) m = Math.min(m, a[i]); return m; }), 0.15 / dx);
 
-  // fender volume: covers the tyre plus `flare`, extends fenderMelt * Ra fore/aft, flat-topped falloff (C1 at its rim)
+  // feature fades along the car: the ledge and the character crease only exist where the side has room for them. The
+  // room is measured per x, turned into a 0..1 amount, then blurred widely, so a feature eases in over a few decimetres
+  // ahead of / behind an arch (switching it per station formed a fold where the arch ended). Rows snap onto a feature
+  // well before it is visible (snapK), so a feature never falls between two rows
+  // (eroded before the blur: the eased amount never exceeds the room actually there, so a feature is never pushed into a
+  // spot where its rows cannot follow it)
+  const erode = (a, rad) => { const r = Math.round(rad / dx); return Float64Array.from(a, (_, j) => { let m = Infinity; for (let i = Math.max(0, j - r); i <= Math.min(M - 1, j + r); i++) m = Math.min(m, a[i]); return m; }); };
+  const fadeK = (lineArr, lo, hi) => blur(erode(Float64Array.from(X, (_, j) => {
+    const zsj = top[j] + rise[j] - P.crown - P.ridge * (hoodWin[j] + deckWin[j]), hj = Math.max(zsj - bot[j], 0.05);
+    const rt = Math.min(P.edgeR, 0.35 * hj) * cornerK[j], rb = Math.min(P.bottomR, 0.25 * hj) * cornerK[j], fl = Math.max(cut[j], cutSoft[j]) + rb;
+    return sstep(lo, hi, Math.min(zsj - rt - lineArr[j], lineArr[j] - fl));
+  }), 0.24), 0.08 / dx);
+  const ledgeK = fadeK(belt, 0.03, 0.1), creaseK = fadeK(chr, 0.02, 0.08);
+  const snapK = (k) => sstep(0, 0.25, k);
+
+  // fender volume: a band that follows the arch (round or angular), pushing the side out by the bulge amount right at the
+  // lip and fading radially outward over fD (set by fenderMelt), flat at the lip and curvature-continuous where it ends.
+  // An ellipsoid centred over the wheel ignored the arch: its rim cut across the shoulder as a ridge and its fore/aft
+  // falloff left dents ahead of the arch
   const tyreOut = P.track / 2 + P.tireW / 2 + 0.015;
-  const fenderPeak = wheels.map((xw, i) => Math.max(W0 * planW[clamp(Math.round((xw - xF) / dx), 0, M - 1)], tyreOut) + (i ? P.flareR : P.flare));
-  const fLx = Ra * P.fenderMelt, fLz = Ra * (0.75 + 0.3 * P.fenderMelt);
+  // one bulge amount per wheel, measured at the wheel: away from it the bulge only fades (measured against the local plan
+  // width it grew wherever the nose or tail tapered, a hump fighting the taper with a dent behind it)
+  const fenderAmt = wheels.map((xw, i) => { const wp = W0 * planW[clamp(Math.round((xw - xF) / dx), 0, M - 1)]; return Math.max(wp, tyreOut) - wp + (i ? P.flareR : P.flare); });
+  // falloff width per wheel: fenderMelt sets it, but never narrower than 3.5x the bulge, so the flank never slopes more
+  // than about 0.55 (a big bulge on a short falloff read as a pinched, near-vertical wall round the arch)
+  const fD = fenderAmt.map((a) => Math.max(Ra * (P.fenderMelt - 0.8) * 0.5, 0.5 * Ra, 3.5 * a));
   // curvature-continuous at its rim (value, slope and curvature reach zero together): no kinked reflections where it ends
-  const melt = (e) => (e >= 1 ? 0 : 1 - e * e * e * (e * (6 * e - 15) + 10));
+  const melt = (e) => (e <= 0 ? 1 : e >= 1 ? 0 : 1 - e * e * e * (e * (6 * e - 15) + 10));
+  // how far (dx, dz) from the wheel centre lies outside the arch, as a smooth superellipse metric: a circle for round
+  // arches, a squared ring with rounded corners for angular ones (an exact distance to the angular outline creases at its
+  // corners, and those creases showed as ridges on the fender). Below the centre the arch drops vertically
+  const pE = P.archShape < 0.5 ? 2 : 4;
+  const archOut = (ddx, ddz) => {
+    const ax = Math.abs(ddx) / Ra, az = Math.max(ddz, 0) / Ra;
+    return Ra * ((ax ** pE + az ** pE) ** (1 / pE) - 1);
+  };
+  const fenderAt = (wi, ddx, z) => fenderAmt[wi] * melt(archOut(ddx, z - R) / fD[wi]);
 
   // station placement: equal steps of an importance length so steep features get dense rings
   // (the fender bulge counts too: a big flare changes the side width fast and was sampled into a staircase)
-  const bulge = Float64Array.from(X, (x, j) => wheels.reduce((m, xw, wi) => Math.max(m, Math.max(0, fenderPeak[wi] - W0 * planW[j]) * melt(((x - xw) / fLx) ** 2)), 0));
+  // the band fades over a different x range at each height (it hugs the arch), so its x profile is taken at several
+  const bulgeAt = (z) => Float64Array.from(X, (x) => wheels.reduce((m, xw, wi) => Math.max(m, fenderAt(wi, x - xw, z)), 0));
+  const bulges = [R - 0.6 * Ra, R, R + 0.6 * Ra, R + Ra].map(bulgeAt);
   const cum = new Float64Array(M);
+  // capped density: the plan rounding has a vertical tangent at the nose and tail tips, which would otherwise pile
+  // stations into a fraction of a millimetre there (degenerate quads, flipping normals)
   for (let j = 1; j < M; j++) {
-    cum[j] = cum[j - 1] + dx + 2.5 * Math.abs(cut[j] - cut[j - 1]) + Math.abs(top[j] - top[j - 1])
-      + 2 * W0 * Math.abs(plan[j] - plan[j - 1]) + Math.abs(rise[j] - rise[j - 1]) + 4 * Math.abs(bulge[j] - bulge[j - 1]);
+    const feat = 2.5 * Math.abs(cut[j] - cut[j - 1]) + Math.abs(top[j] - top[j - 1])
+      + 2 * W0 * Math.abs(plan[j] - plan[j - 1]) + Math.abs(rise[j] - rise[j - 1]) + 4 * bulges.reduce((m, bz) => Math.max(m, Math.abs(bz[j] - bz[j - 1])), 0);
+    cum[j] = cum[j - 1] + dx + Math.min(feat, 30 * dx);
   }
   const at = (arr, j, f) => arr[j] + (arr[Math.min(j + 1, M - 1)] - arr[j]) * f;
 
@@ -376,31 +463,26 @@ export function buildCar(P, opts = {}) {
     let zb = at(cut, j, f);
     const zs = zc + ri - P.crown - ridge;
     const h = Math.max(zs - zr, 0.05);
-    const rt = Math.min(P.edgeR, 0.35 * h);
-    const rb = Math.min(P.bottomR, 0.25 * h);
+    const kC = at(cornerK, j, f), rt = Math.min(P.edgeR, 0.35 * h) * kC, rb = Math.min(P.bottomR, 0.25 * h) * kC;
     zb = Math.min(zb, zs - rt - rb - 0.005);
 
     const fr = sstep(xSecF, xSecR, x);
     const spanB = Math.max(zbelt - zr, 0.1);
-    // features only exist where there is room for them below the top corner; they fade out instead of being squeezed into it
-    const room = zs - rt - zbelt, roomChr = Math.min(zs - rt - zchr, zchr - Math.max(zb, at(cutWide, j, f)) - rb);
-    const ledge = P.ledge * sstep(0.015, 0.1, room);
-    const crease = P.crease * sstep(0.02, 0.08, roomChr);
+    // a feature grows only as fast as its rows snap onto it, so rows never sweep across a visible step or bead
+    const kL = at(ledgeK, j, f), kCr = at(creaseK, j, f), ledge = P.ledge * kL * snapK(kL);
+    const crease = P.crease * kCr * snapK(kCr);
     const ins = (t) => lerp(bodyF(t), bodyR(t), fr);
     const dF = x - xF, dR = xR - x;
     const extras = (z) => {
       const dc = Math.abs(z - zchr);
       let w = crease * lerp(Math.exp(-((dc / 0.025) ** 2)), Math.max(0, 1 - dc / 0.03), P.creaseSharp);
-      for (let wi = 0; wi < 2; wi++) {
-        const ddx = x - wheels[wi];
-        w += fender[wi] * melt((ddx / fLx) ** 2 + ((z - (R + 0.3 * Ra)) / fLz) ** 2);
-      }
+      for (let wi = 0; wi < 2; wi++) w += fenderAt(wi, x - wheels[wi], z);
       // arch lip: a bead just above the real (rolled) arch edge, as strong as the arch is deep, so it ends with the arch
       if (lipAmt > 0) w += lipAmt * Math.exp(-(((z - zb - 0.03) / 0.03) ** 2));
       return w;
     };
-    const fender = fenderPeak.map((pk) => Math.max(0, pk - Wp)), lipAmt = P.archLip * sstep(0, 0.08, zb - zr);
-    const wShoulder = Wp - ins(1), ledgeW = lerp(0.06, 0.006, P.ledgeSharp);
+    const lipAmt = P.archLip * sstep(0, 0.08, zb - zr);
+    const wShoulder = Wp - ins(1), ledgeW = lerp(0.06, 0.012, P.ledgeSharp);
     const W = (z) => {
       let w = Wp - ins(clamp((z - zr) / spanB, 0, 1)) + extras(z);
       if (z > zbelt) w -= ledge * sstep(zbelt, zbelt + ledgeW, z);
@@ -409,7 +491,7 @@ export function buildCar(P, opts = {}) {
       const cp = se(dF / (P.planF * lerp(1, P.noseTaper, tz)), 2.6) * se(dR / (P.planR * lerp(1, P.tailTaper, tz)), 2.6);
       return cp * Math.max(w, 0.25 * W0);
     };
-    const T = (u) => zc - P.crown * u * u - ridge * u + ri * sstep(0.3, 1, u) + dome * Math.exp(-((u / 0.38) ** 2));
+    const T = (u) => zc - P.crown * u * u - ridge * u + ri * riseLat(u) + dome * Math.exp(-((u / 0.38) ** 2));
 
     // half contour in (u, z): u = lateral fraction of W(z)
     let k = 0;
@@ -424,12 +506,18 @@ export function buildCar(P, opts = {}) {
     // the character-line row tracks the crease only where the crease exists; where it has faded (an arch cutting up into
     // it) the row relaxes to an even spacing, so the rows below it are never squashed into a sliver over the arch.
     // The row is fully on the crease before the crease starts to grow (0.02), so a narrow bump never sits between rows.
-    const kc = lerp(lo + (ROWS.chr / (side - 1)) * span, clamp(zchr, lo + 0.05 * span, hi - 0.1 * span), sstep(-0.03, 0.02, roomChr));
-    const kb = clamp(zbelt, kc + 0.05 * span, hi - 0.05 * span);
-    const knots = [[0, lo], [ROWS.chr, kc], [ROWS.belt, kb], [side - 1, hi]];
-    for (let q = 0; q < side; q++) {
-      const s = q < ROWS.chr ? 0 : q < ROWS.belt ? 1 : 2, [i0, z0] = knots[s], [i1, z1] = knots[s + 1];
-      const t = (q - i0) / (i1 - i0), g = t - (0.55 * Math.sin(2 * Math.PI * t)) / (2 * Math.PI);
+    const kc = lerp(lo + (ROWS.chr / (side - 1)) * span, clamp(zchr, lo + 0.05 * span, hi - 0.1 * span), snapK(kCr));
+    // the belt row sits on the ledge line wherever the ledge exists (fully before it starts to grow), evenly spaced elsewhere
+    const kb = lerp(kc + ((ROWS.belt - ROWS.chr) / (side - 1 - ROWS.chr)) * (hi - kc), clamp(zbelt, kc + 0.05 * span, hi - 0.05 * span), snapK(kL));
+    // the ledge step itself gets LS rows of its own (from the belt row to the top of the step), so a sharp ledge is
+    // always resolved by the same rows instead of falling between them in a staircase along the car
+    const LS = Math.max(1, Math.round(side / 20)), iL = Math.min(ROWS.belt + LS, side - 2);
+    const kl = lerp(kb + ((iL - ROWS.belt) / (side - 1 - ROWS.belt)) * (hi - kb), Math.min(kb + ledgeW, (kb + hi) / 2), snapK(kL));
+    const knots = [[0, lo], [ROWS.chr, kc], [ROWS.belt, kb], [iL, kl], [side - 1, hi]];
+    for (let q = 0, s = 0; q < side; q++) {
+      while (s < knots.length - 2 && q >= knots[s + 1][0]) s++;
+      const [i0, z0] = knots[s], [i1, z1] = knots[s + 1];
+      const t = (q - i0) / (i1 - i0), g = s === 2 ? t : t - (0.55 * Math.sin(2 * Math.PI * t)) / (2 * Math.PI);
       put(1, z0 + (z1 - z0) * g);
     }
     for (let q = 1; q <= tc; q++) { const a = (Math.PI / 2) * (q / tc); put(1 - rtu + rtu * spow(Math.cos(a), e), zs - rt + rt * spow(Math.sin(a), e)); }
@@ -475,10 +563,10 @@ export function buildCar(P, opts = {}) {
   // same top-surface law the loft uses: T(u) with u = lateral / top width
   const topAt = (S, lat) => {
     const u = clamp(lat / Math.max(S.Wz, 1e-3), 0, 1);
-    return S.zc - P.crown * u * u - S.ridge * u + S.ri * sstep(0.3, 1, u) + S.dome * Math.exp(-((u / 0.38) ** 2));
+    return S.zc - P.crown * u * u - S.ridge * u + S.ri * riseLat(u) + S.dome * Math.exp(-((u / 0.38) ** 2));
   };
   const cabin = buildCabin(P, {
-    xA, xRF, xRR, xC, W0, doorEnd: wb - Ra - 0.08, detail,
+    xA, xRF, xRR, xC, W0, detail,
     deck: (x) => top[ix(x)],
     deckAt: (x, lat) => { const [a, b, t] = station(x); return lerp(topAt(deckSt[a], lat), topAt(deckSt[b], lat), t); },
     flatW: (x) => { const [a, b, t] = station(x); return lerp(deckSt[a].flat, deckSt[b].flat, t); },
@@ -488,9 +576,15 @@ export function buildCar(P, opts = {}) {
     position: pos, index, aT, aBelt, aIR, outline, sections, cabin, ring,
     lights: buildHeadlights(P, { position: pos, N, RL, xF, xR, W0 }, detail),
     tails: buildTaillights(P, { position: pos, N, RL, xF, xR, W0 }, detail),
+    bars: { front: P.hlType === LIGHT_BAR ? buildLightBar(P, { position: pos, N, RL, xF, xR }, detail, 'front') : null, rear: P.tlType === LIGHT_BAR ? buildLightBar(P, { position: pos, N, RL, xF, xR }, detail, 'rear') : null },
+    fenders: buildFenders(P, {
+      position: pos, N, RL, xF, xR, W0, R, Ra, wheels, tyreFace: P.track / 2 + P.wheelPoke + P.tireW / 2,
+      archY: (d) => R + Ra * archH(Math.min(Math.abs(d) / Ra, 1), P.archShape), floorAt: (x) => bot[ix(x)],
+    }, detail),
+    kit: buildKit(P, { position: pos, N, RL, xF, xR, W0, R, Ra, wb, floorAt: (x) => bot[ix(x)], floorMin: bot.reduce((m, v) => Math.min(m, v), Infinity), fenderGap: P.fdType ? P.fdWidth : 0 }, detail),
+    rack: buildRoof(P, cabin, detail),
     meta: {
       xF, xR, W0, R, Ra, wb, wheels, RL, tSideEnd, tTop, tBot: (bf + bc) / (H - 1), xA, xRF, xRR, xC,
-      doorLines: cabin.doorLines,
     },
   };
 }
@@ -500,23 +594,81 @@ const lerpDeep = (a, b, t) => (typeof a === 'number' ? lerp(a, b, t)
   : a && typeof a === 'object' ? Object.fromEntries(Object.keys(a).map((k) => [k, lerpDeep(a[k], b[k], t)]))
   : a);
 
+// Free randomisation: every parameter gets its own draw, so a car is no longer one preset class with noise.
+// RANDOM: plausible range per scalar (narrower than the sliders, so random cars stay buildable and car-like)
+const RANDOM = {
+  wheelR: [0.29, 0.42], tireW: [0.19, 0.31], rimRatio: [0.5, 0.8], wheelbase: [2.3, 3.1], track: [1.45, 1.72], wheelPoke: [-0.01, 0.05],
+  camber: [-6, 1], archGap: [0.02, 0.07], overhangF: [0.6, 1.15], overhangR: [0.5, 1.15], width: [1.72, 2.05], clearance: [0.1, 0.3],
+  chinZ: [0.22, 0.55], tailBotZ: [0.28, 0.6], planF: [0.2, 0.8], planR: [0.15, 0.7], noseR: [0.04, 0.25], tailR: [0.04, 0.2],
+  noseTaper: [0.8, 2.2], tailTaper: [0.8, 1.8], squareness: [2.6, 6], edgeR: [0.03, 0.16], cabinR: [0.015, 0.045], bottomR: [0.03, 0.15],
+  crown: [0, 0.06], softness: [0.01, 0.06], tension: [0, 0.9], creaseSharp: [0, 1], ledgeSharp: [0, 1],
+  crease: [0, 0.018], flare: [0, 0.08], flareR: [0, 0.1], fenderMelt: [1.6, 2.8], archLip: [0, 0.02], ledge: [0, 0.04], hoodDome: [0, 0.03],
+  peakF: [0, 0.05], peakR: [0, 0.05], pillarFan: [0, 0.4], pillarW: [0.06, 0.12], aPillar: [0.08, 0.16], cPillar: [0.1, 0.5], cTaper: [0.4, 1.2],
+  cabinBlend: [0.01, 0.04], baseRound: [0.3, 0.7], roofRound: [0.2, 0.6], wsCrown: [0.02, 0.14], blCrown: [0.02, 0.1], glassBulge: [0, 0.03],
+  sideBow: [0, 0.03], roofCrown: [0.01, 0.04], roofArch: [0, 0.04], sillInset: [0.02, 0.06], headerInset: [0.03, 0.08],
+  hlH: [0.4, 0.9], hlZ: [0.45, 0.85], hlDepth: [-0.02, 0.03], hlSize: [0.75, 1.3], hlSweep: [0, 35], hlRake: [0, 30], hlAngle: [-15, 25],
+  hlBlend: [0.04, 0.25], hlRound: [0.2, 1], hlMelt: [0.2, 1], hlCrown: [-0.01, 0.03],
+  tlH: [0.4, 0.9], tlZ: [0.45, 0.85], tlDepth: [-0.02, 0.03], tlSize: [0.75, 1.3], tlSweep: [0, 35], tlRake: [0, 30], tlAngle: [-15, 25],
+  tlBlend: [0.04, 0.25], tlRound: [0.2, 1], tlMelt: [0.2, 1], tlCrown: [-0.01, 0.03],
+  fdWidth: [0.07, 0.16], fdOut: [0.025, 0.08], fdLip: [0.005, 0.025], fdWrap: [0.3, 0.9], fdBlend: [0.02, 0.06],
+  kitH: [0.07, 0.16], kitDrop: [0, 0.05], kitOut: [0.7, 1.6], kitBlend: [0.02, 0.05], metal: [0, 0.8], rough: [0.1, 0.5],
+  rfLen: [0.55, 1], rfWidth: [0.7, 1], rfH: [0.05, 0.12],
+};
+const FREE = 0.75; // chance a scalar is drawn fresh from its range instead of nudged from the blended base
+
 export function randomCar(rng = Math.random) {
-  const keys = Object.keys(PRESETS);
-  const pick = () => PRESETS[keys[Math.floor(rng() * keys.length)]];
-  const a = pick(), b = pick(), t = rng();
-  const P = lerpDeep(clone(a), b, t);
-  const r = (amt) => (rng() * 2 - 1) * amt;
-  ['wheelbase', 'overhangF', 'overhangR', 'width', 'flare', 'flareR', 'fenderMelt', 'crease', 'edgeR', 'noseTaper', 'roofRound', 'wsCrown', 'sideBow'].forEach((k) => { P[k] *= 1 + r(0.12); });
-  P.pillars = P.pillars.map(([f, lean]) => [f + r(0.04), lean + r(0.08)]);
-  const lift = r(0.08);
-  P.profile.forEach((p, i) => { if (i > 0 && i < 7) p[0] += r(0.04); if (i >= 3 && i <= 4) p[1] += lift; });
-  P.plan.forEach((p) => { p[1] += r(0.04); });
-  P.cabin = P.cabin.map((c) => c + r(0.04));
-  for (const sec of [P.secF, P.secR]) { sec.body.forEach((p) => { p[1] += r(0.012); }); sec.glass[1] += r(0.08); }
-  P.peakF = Math.max(0, P.peakF + r(0.02)); P.peakR = Math.max(0, P.peakR + r(0.02));
-  P.spokes = Math.round(P.spokes);
-  P.doors = rng() < 0.5 ? 2 : 4;
-  P.contrastRoof = rng() < 0.3 ? 1 : 0;
-  P.color = ['#1f3a5f', '#8f1d1d', '#e9e9e6', '#2f7d3b', '#d0491f', '#6c7178', '#1b1c1e', '#c9a227', '#2a54a8'][Math.floor(rng() * 9)];
-  return sanitize(P);
+  const keys = Object.keys(PRESETS), pick = (a) => a[Math.floor(rng() * a.length)];
+  const u = (a, b) => a + (b - a) * rng(), j = (amt) => (rng() * 2 - 1) * amt, chance = (p) => rng() < p;
+  // proportions and section shapes start from a random mix of one to three presets
+  let P = clone(PRESETS[pick(keys)]);
+  for (let n = Math.floor(rng() * 3); n > 0; n--) P = lerpDeep(P, PRESETS[pick(keys)], rng());
+  for (const [k, [lo, hi]] of Object.entries(RANDOM)) P[k] = chance(FREE) ? u(lo, hi) : clamp(P[k] + j(0.15 * (hi - lo)), lo, hi);
+  // features that are usually off stay off more often than not
+  for (const k of ['ridge', 'cladding']) P[k] = chance(0.25) ? u(0.01, k === 'ridge' ? 0.03 : 0.1) : 0;
+
+  // side view: hood, windshield base, roof and deck heights each move on their own; the roof moves as one piece
+  const pr = P.profile, lift = u(-0.18, 0.22);
+  pr.forEach((p, i) => { if (i > 0 && i < 7) p[0] += j(0.07); });
+  pr[0][1] += j(0.1); pr[1][1] += j(0.12); pr[2][1] += j(0.08);
+  pr[3][1] += lift + j(0.04); pr[4][1] += lift + j(0.04);
+  pr[5][1] += j(0.1); pr[6][1] += j(0.1); pr[7][1] += j(0.08);
+  // roof length: anything from a short bubble to a long wagon roof
+  pr[4][0] = pr[3][0] + u(0.12, 1.1) * (pr[5][0] - pr[3][0]) * 0.85;
+  P.belt.forEach((p) => { p[1] += j(0.07); }); P.chr.forEach((p) => { p[1] += j(0.07); });
+  P.plan.forEach((p) => { p[1] += j(0.07); });
+  P.cabin = P.cabin.map((c) => c + j(0.09));
+  for (const sec of [P.secF, P.secR]) { sec.body.forEach((p) => { p[1] += j(0.025); }); sec.glass = [u(0.3, 0.7), u(0.22, 0.6)]; }
+  const np = Math.floor(rng() * 4);
+  P.pillars = Array.from({ length: np }, (_, i) => [(i + 1) / (np + 1) + j(0.05), j(0.15)]);
+
+  // discrete choices, each on its own
+  P.spokes = 3 + Math.floor(rng() * 10);
+  P.hlType = chance(0.05) ? 0 : 1 + Math.floor(rng() * 7);
+  P.tlType = chance(0.05) ? 0 : 1 + Math.floor(rng() * 7);
+  P.fdType = chance(0.55) ? 0 : 1 + Math.floor(rng() * 3);
+  P.archShape = chance(0.3) ? 1 : 0;
+  P.rimType = Math.floor(rng() * 5);
+  P.rfType = chance(0.65) ? 0 : 1 + Math.floor(rng() * 3);
+  // body kit: none, one matching set, or pieces mixed from different sets
+  const kit = rng(), set = 1 + Math.floor(rng() * 3);
+  for (const k of ['kitF', 'kitS', 'kitR']) P[k] = kit < 0.4 ? 0 : kit < 0.75 ? set : (chance(0.25) ? 0 : 1 + Math.floor(rng() * 3));
+  P.contrastRoof = chance(0.3) ? 1 : 0;
+  const hsl = (h, s, l) => { const f = (n) => { const k = (n + h / 30) % 12, a = s * Math.min(l, 1 - l); return Math.round(255 * (l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))).toString(16).padStart(2, '0'); }; return `#${f(0)}${f(8)}${f(4)}`; };
+  P.color = chance(0.35) ? pick(['#1f3a5f', '#8f1d1d', '#e9e9e6', '#2f7d3b', '#d0491f', '#6c7178', '#1b1c1e', '#c9a227', '#2a54a8'])
+    : hsl(u(0, 360), chance(0.2) ? u(0, 0.12) : u(0.35, 0.85), u(0.18, 0.62));
+  sanitize(P);
+  // free draws can pair big wheels with a short overhang (the arch eats the nose), or a high lower edge with a low nose
+  // or tail; keep room ahead of / behind the arches and a real end face for the edge radius to round
+  const Ra = P.wheelR + P.archGap, prf = P.profile, last = prf.length - 1;
+  // windshield base and deck clear the arch tops, so the automatic fender rise forms peaks beside the cabin, never under
+  // its glass
+  prf[2][1] = Math.max(prf[2][1], P.wheelR + Ra + 0.04); prf[5][1] = Math.max(prf[5][1], P.wheelR + Ra + 0.04);
+  for (const i of [3, 4]) prf[i][1] = Math.max(prf[i][1], Math.max(prf[2][1], prf[5][1]) + 0.3); // a real greenhouse
+  prf[1][1] = Math.max(prf[1][1], prf[2][1] - 0.2); // the cabin stands on the cowl: no steep climb up to the windshield
+  prf[0][1] = Math.min(prf[0][1], prf[1][1] - 0.02); prf[last][1] = Math.min(prf[last][1], prf[last - 1][1] - 0.02); // ends fall away
+  P.overhangF = Math.max(P.overhangF, Ra + 0.42); P.overhangR = Math.max(P.overhangR, Ra + 0.3);
+  const fN = prf[0][1], fT = prf[last][1];
+  P.chinZ = clamp(P.chinZ, P.clearance + 0.04, fN - 0.22); P.noseR = Math.min(P.noseR, 0.4 * (fN - P.chinZ));
+  P.tailBotZ = clamp(P.tailBotZ, P.clearance + 0.04, fT - 0.22); P.tailR = Math.min(P.tailR, 0.4 * (fT - P.tailBotZ));
+  return P;
 }
