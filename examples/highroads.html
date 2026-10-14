@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Car-gen as a library: HighRoads-style usage</title>
+<!-- the host's import map decides which three.js the generator uses (HighRoads pins 0.169.0) -->
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.169.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.169.0/examples/jsm/"
+} }
+</script>
+<style>
+  html, body { margin: 0; height: 100%; background: #15171a; color: #ddd; font: 13px system-ui, sans-serif; }
+  canvas { display: block; }
+  #info { position: fixed; left: 12px; top: 10px; max-width: 46ch; line-height: 1.45; }
+  code { color: #f0a868; }
+</style>
+</head>
+<body>
+<div id="info">
+  Five cars from <code>createCar(seed)</code>, driven exactly like HighRoads traffic drives its models: wheel holders
+  placed at <code>(±trackHalf, wheelRadius, ±wheelbaseHalf)</code> and spun about X. Front is −Z (the arrow).
+  <span id="stats"></span>
+</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { createCar } from '../src/index.js';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.03).texture;
+const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 200);
+camera.position.set(9, 5, 9);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0.6, 0);
+const sun = new THREE.DirectionalLight(0xffffff, 1.5);
+sun.position.set(6, 10, 4); sun.castShadow = true;
+Object.assign(sun.shadow.camera, { left: -12, right: 12, top: 12, bottom: -12 });
+sun.shadow.mapSize.set(2048, 2048);
+scene.add(sun);
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(60, 60), new THREE.MeshStandardMaterial({ color: 0x2a2d31, roughness: 0.95 }));
+ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
+scene.add(ground);
+scene.add(new THREE.ArrowHelper(new THREE.Vector3(0, 0, -1), new THREE.Vector3(-9, 0.05, 2), 3, 0xf0a868));
+
+const cars = ['highroads-1', 'highroads-2', 'sedan', 'highroads-4', 'highroads-5'].map((seed, i) => {
+  const car = createCar(seed, { detail: 0.4 });
+  const group = new THREE.Group();
+  group.add(car.body);
+  for (const k of ['FL', 'FR', 'BL', 'BR']) group.add(car.wheels[k]);
+  group.position.x = (i - 2) * 3.6;
+  scene.add(group);
+  return { car, spin: 0, brake: i % 2 };
+});
+const tris = cars.reduce((s, c) => s + c.car.metrics.triangles, 0);
+document.getElementById('stats').textContent = ` ${cars.length} cars, ${(tris / 1000).toFixed(0)}k triangles total.`;
+window.__cars = cars; window.__view = { camera, controls, scene };
+
+const clock = new THREE.Clock();
+function resize() { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); }
+addEventListener('resize', resize); resize();
+renderer.setAnimationLoop(() => {
+  const dt = clock.getDelta(), t = clock.elapsedTime;
+  for (const c of cars) {
+    const { metrics: m, wheels } = c.car;
+    c.spin += (8 / m.wheelRadius) * dt;
+    const layout = { FL: [-m.trackHalf, -m.wheelbaseHalf], FR: [m.trackHalf, -m.wheelbaseHalf], BL: [-m.trackHalf, m.wheelbaseHalf], BR: [m.trackHalf, m.wheelbaseHalf] };
+    for (const k in layout) {
+      wheels[k].position.set(layout[k][0], m.wheelRadius, layout[k][1]);
+      wheels[k].rotation.set(-c.spin, k[0] === 'F' ? 0.3 * Math.sin(t) : 0, 0, 'YXZ');
+    }
+    c.car.setBrake(c.brake ? 0.5 + 0.5 * Math.sin(t * 3) : 0);
+  }
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

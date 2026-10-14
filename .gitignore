@@ -1,2 +1,4 @@
 .DS_Store
 reference-images/
+node_modules/
+package-lock.json

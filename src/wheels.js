@@ -51,7 +51,7 @@ const extrude = (THREE, pts, depth, bevel, curve = 6) => {
 const nut = (s) => [[0, -0.003], [s, -0.003, 1], [s, s * 1.1, 1], [s * 0.82, s * 1.45], [0, s * 1.5]];
 // merge closed geometries sharing one material into one, keeping their normals
 const merge = (THREE, list) => {
-  const gs = list.map((g) => (g.index ? g : g.toNonIndexed()));
+  const gs = list;
   const nv = gs.reduce((s, g) => s + g.attributes.position.count, 0), ni = gs.reduce((s, g) => s + (g.index ? g.index.count : g.attributes.position.count), 0);
   const pos = new Float32Array(nv * 3), nrm = new Float32Array(nv * 3), idx = new Uint32Array(ni);
   let ov = 0, oi = 0;
@@ -88,7 +88,9 @@ export function makeWheel(THREE, P, detail, M) {
   const cal = extrude(THREE, arc(rr * 0.6, rr * 0.8, 2.2, 2.85), 0.026, 0.005, 2);
   cal.translate(0, 0, zB - 0.006); parts.caliper.push(cal);
 
-  const lugs = (zb, r = rr * 0.2) => { for (let i = 0; i < 5; i++) { const a = (TAU * i) / 5; parts.chrome.push(placed(lathe(THREE, nut(0.0095), 6), r * Math.cos(a), r * Math.sin(a), zb)); } };
+  // fasteners (lug nuts, lip rivets and bolts) are sub-centimetre: skipped at low detail, where they cost most of the wheel
+  const fine = detail >= 0.3;
+  const lugs = (zb, r = rr * 0.2) => { if (fine) for (let i = 0; i < 5; i++) { const a = (TAU * i) / 5; parts.chrome.push(placed(lathe(THREE, nut(0.0095), 6), r * Math.cos(a), r * Math.sin(a), zb)); } };
   if (type === 0) {
     // spoke: one bevelled plate with sector windows between n spokes, a lip ring and a centre cap
     const r1 = rr * 0.36, r2 = rr * 0.86, sw = Math.min(0.012 + 0.06 / n, rr * 0.18);
@@ -118,7 +120,7 @@ export function makeWheel(THREE, P, detail, M) {
     parts.chrome.push(lathe(THREE, [[rr * 0.89, z0 - 0.012, 1], [rr * 0.9, z0 - 0.004], [rr * 0.95, z0 - 0.002], [rr * 0.955, z0 + 0.004, 1], [rr * 1.02, z0 + 0.004, 1],
       [rr * 1.03, z0 - 0.006], [rr * 1.0, z0 - 0.026, 1], [rr * 0.89, z0 - 0.026, 1]], S));
     const nr = Math.round(lerp(16, 30, dl));
-    for (let i = 0; i < nr; i++) { const a = (TAU * i) / nr; parts.chrome.push(placed(lathe(THREE, [[0, 0], [0.0042, 0, 1], [0.0042, 0.0012], [0.003, 0.0026], [0, 0.003]], 8), rr * 0.925 * Math.cos(a), rr * 0.925 * Math.sin(a), z0 - 0.002)); }
+    if (fine) for (let i = 0; i < nr; i++) { const a = (TAU * i) / nr; parts.chrome.push(placed(lathe(THREE, [[0, 0], [0.0042, 0, 1], [0.0042, 0.0012], [0.003, 0.0026], [0, 0.003]], 8), rr * 0.925 * Math.cos(a), rr * 0.925 * Math.sin(a), z0 - 0.002)); }
     parts.rim.push(lathe(THREE, [[0, z0 - 0.006], [rr * 0.25, z0 - 0.006], [rr * 0.33, z0 - 0.02], [rr * 0.33, z0 - 0.034, 1], [0, z0 - 0.034]], seg(10, 40)));
     parts.chrome.push(lathe(THREE, [[0, z0 + 0.006], [rr * 0.09, z0 + 0.004], [rr * 0.1, z0 - 0.008, 1], [0, z0 - 0.008]], seg(8, 32)));
     lugs(z0 - 0.007, rr * 0.18);
@@ -129,7 +131,7 @@ export function makeWheel(THREE, P, detail, M) {
       [rr * 0.835, z0 + 0.004, 1], [rr * 0.94, z0 + 0.006], [rr * 0.99, z0 + 0.002], [rr * 1.02, z0 - 0.008], [rr * 1.0, z0 - 0.026, 1], [0, z0 - 0.026]], S));
     parts.chrome.push(lathe(THREE, [[0, z0 + 0.018], [rr * 0.06, z0 + 0.016], [rr * 0.1, z0 + 0.008], [rr * 0.11, z0 + 0.002, 1], [0, z0 + 0.002]], seg(10, 36)));
     const nb = 10;
-    for (let i = 0; i < nb; i++) { const a = (TAU * i) / nb + 0.3; parts.chrome.push(placed(lathe(THREE, nut(0.0055), 6), rr * 0.9 * Math.cos(a), rr * 0.9 * Math.sin(a), z0 + 0.004)); }
+    if (fine) for (let i = 0; i < nb; i++) { const a = (TAU * i) / nb + 0.3; parts.chrome.push(placed(lathe(THREE, nut(0.0055), 6), rr * 0.9 * Math.cos(a), rr * 0.9 * Math.sin(a), z0 + 0.004)); }
   } else if (type === 3) {
     // turbofan: curved blades swept between the hub and a flat outer ring
     const blades = Math.max(10, n * 2), r1 = rr * 0.3, r2 = rr * 0.82, sweep = 0.55, curve = 10;
@@ -162,7 +164,7 @@ export function makeWheel(THREE, P, detail, M) {
     const star = new THREE.ExtrudeGeometry(shape, { depth: 0.016, bevelEnabled: true, bevelThickness: 0.006, bevelSize: 0.005, bevelSegments: detail > 0.7 ? 3 : 1, curveSegments: seg(4, 48) });
     star.translate(0, 0, z0 - dd - 0.022); parts.rim.push(star);
     const nb = Math.round(lerp(14, 24, dl));
-    for (let i = 0; i < nb; i++) { const a = (TAU * i) / nb; parts.chrome.push(placed(lathe(THREE, nut(0.0042), 6), rr * 0.975 * Math.cos(a), rr * 0.975 * Math.sin(a), z0 - 0.0005, a)); }
+    if (fine) for (let i = 0; i < nb; i++) { const a = (TAU * i) / nb; parts.chrome.push(placed(lathe(THREE, nut(0.0042), 6), rr * 0.975 * Math.cos(a), rr * 0.975 * Math.sin(a), z0 - 0.0005, a)); }
     parts.chrome.push(lathe(THREE, [[0, z0 - dd + 0.006], [rr * 0.1, z0 - dd + 0.004], [rr * 0.12, z0 - dd - 0.01, 1], [0, z0 - dd - 0.01]], seg(8, 32)));
     lugs(z0 - dd - 0.007, rr * 0.2);
   }

@@ -296,3 +296,36 @@ function openEdges({ position: p, index: idx }) {
   }
   console.log('ok roof length and plan width minimums hold');
 }
+
+// fenders rise gradually: along the car the side never slopes in or out faster than 1:1 around the arches (a pinched,
+// near-vertical bulge read as a pulled-up blister), and arch shapes are only round or angular
+{
+  let seed11 = 53;
+  const rng11 = () => ((seed11 = (seed11 * 16807) % 2147483647) / 2147483647);
+  for (const [name, P] of [...Object.entries(PRESETS).map(([k, p]) => [k, sanitize(clone(p))]), ...Array.from({ length: 12 }, (_, i) => [`random${i}`, randomCar(rng11)])]) {
+    assert.ok(P.archShape === 0 || P.archShape === 1, `${name}: arch shape ${P.archShape} is neither round nor angular`);
+    const g = buildCar(P, { detail: 0.6 }), o = g.outline, p = g.position, RL = g.meta.RL, { bf, bc, side } = g.ring, m = g.meta;
+    // half width at a fixed height, read off a station's side rows (monotone in height there)
+    const widthAt = (i, zt) => {
+      for (let q = bf + bc; q < bf + bc + side - 1; q++) {
+        const a = (i * RL + q) * 3, b = (i * RL + q + 1) * 3;
+        if ((p[a + 1] - zt) * (p[b + 1] - zt) <= 0 && p[a + 1] !== p[b + 1]) return p[a + 2] + ((p[b + 2] - p[a + 2]) * (zt - p[a + 1])) / (p[b + 1] - p[a + 1]);
+      }
+      return null;
+    };
+    let worst = 0;
+    // toward the doors from each arch (the nose and tail taper on purpose), at heights beside and over the wheel
+    for (const [xw, dir] of [[0, 1], [m.wb, -1]]) for (const zt of [m.R, m.R + 0.5 * m.Ra, m.R + m.Ra + 0.04]) {
+      let prev = null;
+      for (let i = 0; i < o.x.length; i++) {
+        const d = (o.x[i] - xw) * dir;
+        if (d < m.Ra + 0.04 || d > m.Ra + 0.6) continue;
+        const w = widthAt(i, zt);
+        if (w !== null && prev && o.x[i] - prev[0] > 0.004) worst = Math.max(worst, Math.abs(w - prev[1]) / (o.x[i] - prev[0]));
+        if (w !== null) prev = [o.x[i], w]; else prev = null;
+      }
+    }
+    assert.ok(worst < 1, `${name}: fender flank slopes ${worst.toFixed(2)} along the car`);
+  }
+  console.log('ok fenders rise gradually; arches round or angular');
+}

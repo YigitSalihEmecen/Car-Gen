@@ -353,17 +353,28 @@ export function buildCar(P, opts = {}) {
   // hill is as wide as its height demands, so the climb never exceeds RISE_SLOPE: a tall lift spreads over the hood and
   // cowl instead of being pinched up over the wheel
   const RISE_SLOPE = 0.5, rise = new Float64Array(M), hw0 = (0.22 + 0.12 * P.fenderMelt) / dx;
+  // ...except toward the cabin: a hill never reaches past the windshield base (front wheels) or the deck start (rear),
+  // where lifting the deck would bend the pillars standing on it
+  const xMidCab = (xA + xC) / 2;
   for (let j = 0; j < M; j++) if (need[j] > 0) {
     const hw = Math.max(hw0, (HILL_SLOPE * need[j]) / RISE_SLOPE / dx);
-    for (let i = Math.max(0, Math.floor(j - hw)); i <= Math.min(M - 1, Math.ceil(j + hw)); i++) {
-      const e = ((i - j) / hw) ** 2;
+    const front = X[j] < xMidCab, hwB = front ? hw : Math.min(hw, Math.max(0.1 / dx, (X[j] - xC) / dx)), hwA = front ? Math.min(hw, Math.max(0.1 / dx, (xA - X[j]) / dx)) : hw;
+    for (let i = Math.max(0, Math.floor(j - hwB)); i <= Math.min(M - 1, Math.ceil(j + hwA)); i++) {
+      const e = ((i - j) / (i < j ? hwB : hwA)) ** 2;
       if (e < 1) rise[i] = Math.max(rise[i], need[j] * (1 - e * e * e * (e * (6 * e - 15) + 10)));
     }
   }
   // designed fender peaks: the same kind of hill, centred on each wheel (a hood-length window ended in a fold at the
-  // windshield base and another at the nose)
-  const hwP = Ra * (1.6 + 0.5 * P.fenderMelt), hill = (d) => { const e = (d / hwP) ** 2; return e >= 1 ? 0 : 1 - e * e * e * (e * (6 * e - 15) + 10); };
-  for (let j = 0; j < M; j++) rise[j] += P.peakF * hill(X[j]) + P.peakR * hill(X[j] - wb);
+  // windshield base and another at the nose), never reaching past the
+  // windshield base (rear wheels: deck start), like the automatic hills
+  const hwP = Ra * (1.6 + 0.5 * P.fenderMelt), hill = (d, back, fwd) => { const e = (d / (d < 0 ? back : fwd)) ** 2; return e >= 1 ? 0 : 1 - e * e * e * (e * (6 * e - 15) + 10); };
+  const hpF = Math.min(hwP, Math.max(0.3, xA)), hpR = Math.min(hwP, Math.max(0.3, wb - xC));
+  for (let j = 0; j < M; j++) {
+    const off = 1 - sstep(xA - 0.25, xA, X[j]) * (1 - sstep(xC, xC + 0.25, X[j])); // nothing under the glass house
+    rise[j] += off * (P.peakF * hill(X[j], hwP, hpF) + P.peakR * hill(X[j] - wb, hpR, hwP));
+  }
+  // wide hills would reach the nose / tail tip, where the end rounding collapses the section: fade out over the ends
+  for (let j = 0; j < M; j++) rise[j] *= sstep(0, 0.06, X[j] - xF) * sstep(0, 0.06, xR - X[j]);
   // the arch lifts the section floor, so over the top its edge rolls with the section's bottom radius; on the steep
   // flanks only an x-blur of the lift can roll it, otherwise the lip turns into a crisp vertical edge (a streak in reflections)
   const cut = blur(Float64Array.from(bot, (b, j) => Math.max(0, arch[j] - b)), ARCH_ROLL * Math.max(P.bottomR, 0.03) / dx).map((l, j) => bot[j] + l);
@@ -672,3 +683,19 @@ export function randomCar(rng = Math.random) {
   P.tailBotZ = clamp(P.tailBotZ, P.clearance + 0.04, fT - 0.22); P.tailR = Math.min(P.tailR, 0.4 * (fT - P.tailBotZ));
   return P;
 }
+
+/** Deterministic PRNG from a number or string seed (mulberry32): same seed, same sequence. */
+export function seeded(seed) {
+  let h = 2166136261 >>> 0;
+  for (const ch of String(seed)) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0;
+  let a = h || 1;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Parameters for a seed: the same free randomisation as the app's Generate button, but reproducible. */
+export const randomParams = (seed) => randomCar(seeded(seed));

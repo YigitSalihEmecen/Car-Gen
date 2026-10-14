@@ -1,1 +1,15 @@
-{"name":"car-engine","private":true,"type":"module","scripts":{"test":"node test/car.test.mjs","start":"python3 -m http.server 8642"}}
+{
+  "name": "car-gen",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Asset-free parametric car generator for three.js: standalone editor and a no-build library",
+  "main": "src/index.js",
+  "exports": { ".": "./src/index.js" },
+  "peerDependencies": { "three": ">=0.160.0" },
+  "scripts": {
+    "start": "python3 -m http.server 8642",
+    "test": "node test/car.test.mjs && node test/lib.test.mjs",
+    "test:deps": "npm install --no-save --no-audit --no-fund three@0.169.0"
+  }
+}

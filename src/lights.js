@@ -381,7 +381,7 @@ export function mirrored(p, i, nrm) {
 }
 
 export const LAMP_PARTS = ['housing', 'chrome', 'lens', 'glass', 'led', 'amber', 'red', 'tint', 'white'];
-const FRONT = 1.6, LIP = 0.003, REACH = 0.6, MAX_BACK = 0.2, OVERLAP = 0.006, GRAZE = 0.45, CLEAR = 0.01, STEP = 0.008;
+const FRONT = 1.6, LIP = 0.003, REACH = 0.6, MAX_BACK = 0.2, OVERLAP = 0.006, GRAZE = 0.35, CLEAR = 0.01, STEP = 0.008;
 
 export const buildHeadlights = (P, body, detail) => buildLamps(P, body, detail, 'front');
 export const buildTaillights = (P, body, detail) => buildLamps(P, body, detail, 'rear');
