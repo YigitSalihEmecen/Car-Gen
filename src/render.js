@@ -76,7 +76,9 @@ function makePaint() {
       .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
         metalnessFactor *= mPaint;`)
       .replace('#include <lights_physical_fragment>', `#include <lights_physical_fragment>
-        material.clearcoat *= 1.0 - trim;`)
+        #ifdef USE_CLEARCOAT
+          material.clearcoat *= 1.0 - trim;
+        #endif`)
       .replace('#include <dithering_fragment>', `#include <dithering_fragment>
         if (uZebra > 0.5) {
           vec3 r = reflect(normalize(vViewPosition), normalize(normal));
