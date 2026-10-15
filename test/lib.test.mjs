@@ -33,6 +33,13 @@ for (const input of ['sedan', 'offroad', 'supercar', 1, 2, 3, 'seed-x', 'seed-y'
   assert.ok(Math.abs((wb.min.z + wb.max.z) / 2 + m.wheelbaseHalf) < 0.02, `${input}: wheel not on its axle`);
   assert.ok(wb.max.x - wb.min.x < m.wheelWidth + 0.03, `${input}: wheel axle is not along X`);
 
+  // exhaust tips: one per mouth, at the tail behind the body's rear, where the exhaust geometry ends
+  const nTips = [0, 1, 2, 4][car.params.exType | 0];
+  assert.equal(m.exhaustTips.length, nTips, `${input}: ${m.exhaustTips.length} exhaust tips for type ${car.params.exType}`);
+  const pipes = new THREE.Box3();
+  car.body.traverse((o) => { if (o.isMesh && o.visible && o.material === car.materials.acc.burnt) pipes.expandByObject(o, true); });
+  for (const [x, y, z] of m.exhaustTips) assert.ok(pipes.expandByScalar(0.001).containsPoint(new THREE.Vector3(x, y, z)) && Math.abs(z - pipes.max.z) < 0.03, `${input}: exhaust tip at ${[x, y, z].map((v) => v.toFixed(2))} is not at a mouth`);
+
   // setters act on this car only
   car.setColor('#ff0000');
   assert.equal(car.materials.paint.color.getHexString(), 'ff0000');

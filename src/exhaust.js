@@ -17,13 +17,15 @@ export function buildExhaust(P, body, detail = 1) {
   const zs0 = clamp(P.exSpread, 0.2, 0.85) * body.W0;
   const zs = quad ? [zs0 - 1.15 * r, zs0 + 1.15 * r] : [zs0];
   const L = 0.13, t = Math.max(0.0035, r * 0.08), ri = r * 0.74, drop = 0.035;
-  const B = bags();
+  const B = bags(), tips = [];
   for (const z of zs) {
     // the rearmost thing behind the tip at its height: skin (rays across the tip's band) and a fitted rear bumper
     let xe = -Infinity;
     for (let k = -2; k <= 2; k++) { const h = cast([body.xR + 1, yc + (k / 2) * r * 0.95, z], [-1, 0, 0]); if (h) xe = Math.max(xe, h.p[0]); }
     if (xe === -Infinity) { const h = cast([body.xR + 1, zTk + 0.012, z], [-1, 0, 0]); xe = h ? h.p[0] : body.xR - 0.05; }
     xe = Math.max(xe, body.kitMaxX?.(yc - r, yc + r, z - r, z + r) ?? -Infinity) + P.exOut + 0.005;
+    tips.push([xe, yc, z]);
+    if (P.exType !== 1) tips.push([xe, yc, -z]);
     const fr = frame([xe, yc, z], [0, 0, 1], Y, [1, 0, 0]), dn = unit([1, -drop, 0]);
     const tip = frame(fr.O, [0, 0, 1], unit([drop, 1, 0]), dn);
     const f = r * 1.03;
@@ -35,6 +37,6 @@ export function buildExhaust(P, body, detail = 1) {
     // the pipe behind the tip, hidden under the body
     spin(B.dark, tip, 0, 0, [[0, -L - 0.02], [r * 0.9, -L - 0.02], [r * 0.7, -L - 0.06], [r * 0.7, -0.75], [0, -0.75]], Math.max(8, segs >> 1));
   }
-  // one tip sits on the right only; dual and quad are mirrored pairs
-  return finish(B, P.exType !== 1);
+  // one tip sits on the right only; dual and quad are mirrored pairs. `tips`: each mouth's centre, for hosts
+  return Object.assign(finish(B, P.exType !== 1), { tips });
 }

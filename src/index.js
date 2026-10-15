@@ -49,7 +49,7 @@ export function createCar(input, { detail = 0.5 } = {}) {
     update(next) {
       const P = (car.params = typeof next === 'object' ? sanitize(clone(next)) : parse(next));
       const prevProto = view.wheelProto;
-      view.update(P, detail);
+      const built = view.update(P, detail);
       inner.position.set(0, 0, -P.wheelbase / 2);
       if (view.wheelProto !== prevProto) {
         for (const k of WHEELS) { spinners[k].clear(); spinners[k].add(view.wheelProto.clone()); }
@@ -69,6 +69,8 @@ export function createCar(input, { detail = 0.5 } = {}) {
         bodyHalfLength: (box.max.z - box.min.z) / 2,
         // where the body ends fore and aft of the axle midpoint (overhangs differ, so the body is not centred)
         bodyFrontZ: box.min.z, bodyRearZ: box.max.z,
+        // each exhaust mouth's centre (flames, smoke); empty with no exhaust fitted
+        exhaustTips: (built.exhaust?.tips ?? []).map(([x, y, z]) => [-z, y, x - P.wheelbase / 2]),
         triangles: view.triangles() + 4 * countTris(view.wheelProto),
       };
       return car;
