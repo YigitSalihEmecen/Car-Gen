@@ -1,7 +1,8 @@
 # Car-gen
 
 Asset-free parametric car generator for three.js. Every car (body, greenhouse, lamps, wheels, flares, body kit, roof
-gear) is built from numbers at runtime. Nothing is loaded.
+gear, plates, exhaust, spoilers, mirrors, antennas, grilles, hood parts) is built from numbers at runtime. Nothing is
+loaded.
 
 It is two things from one source tree:
 
@@ -32,6 +33,8 @@ src/
   params.js         parameter schema (groups, ranges, option names); drives the editor panel
   car.js            the generator: presets, sanitize, randomCar, buildCar (pure math, typed arrays, no three.js)
   cabin.js lights.js lightbar.js flares.js kit.js roof.js wheels.js   parts
+  acc.js            shared tools for the bolt-on accessories below (frames, sweeps, lathes, seating pads)
+  plates.js exhaust.js spoiler.js mirrors.js antenna.js grille.js hood.js   accessories
   app.js            the editor only (scene, UI, orthographic editors)
 examples/
   highroads.html    the library used exactly as HighRoads uses its car models
@@ -98,6 +101,29 @@ is about 50–100 ms per car below 0.6, so build traffic up front or across fram
 **Schema**: `PARAMS` lists every editor parameter as `{ key, label, min, max, step, unit, group, tab, options? }`
 (`SPEC` is the grouped form). A garage UI can generate its controls from it and stay in sync with the editor.
 `pillarCount` is virtual: use `setPillarCount(params, n)`.
+
+## The tail
+
+The rear end is a side profile at the centre line, not a vertical cut rolled over at the top: deck → lip edge
+(`tailR`) → upper face (`tailRake`, positive undercuts the lip) → crease (`tailCrease`, `tailCreaseR`) → lower face
+(`tailTuck`) → floor, every corner its own fillet. Each height gets its own plan slice: a bowed face (`tailBow`)
+running into a corner of size `planR` and squareness `tailBox`. Tail lamps live on the upper face and their rake is
+measured from it. A bumper standing proud of the face is a body-kit part.
+
+## Accessories
+
+| group | styles |
+|---|---|
+| Plates (`plateType`) | EU, UK (yellow rear), US, Japan, square two-line; front and rear, in a holder seated on the skin |
+| Exhaust (`exType`) | single, dual, quad tips under the tail |
+| Spoiler (`spType`) | lip, ducktail, pedestal wing, GT wing (swan necks), roof spoiler |
+| Mirrors (`mrType`) | modern, racing bullet, classic chrome |
+| Antenna (`anType`) | shark fin, roof mast, hood power mast, rear whip |
+| Grille (`grType`) | kidney, singleframe, twin louvre, waterfall, egg-crate |
+| Hood (`hdType`) | blower through the hood, side louvres, centre scoop, cowl scoop |
+| Body kit (`kitF/S/R`) | street, track, rugged, rocket (oversized bolt-on), chrome (classic blade bumpers) |
+
+Every accessory is rigid, posed by rays against the body, and seated with pads or skirts sunk into the skin.
 
 ## Tests
 

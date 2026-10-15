@@ -22,7 +22,7 @@ export const ROOF_TYPES = ['None', 'Crossbars', 'Cargo box', 'Expedition'];
 export const ROOF_PARTS = ['metal', 'plastic', 'rubber', 'box', 'frame', 'lens', 'led', 'chrome'];
 
 // ray straight down onto a triangle mesh (the roof skin): highest hit and its face normal
-function castDown({ position: p, index: idx }, x, z) {
+export function castDown({ position: p, index: idx }, x, z) {
   let best = null;
   for (let f = 0; f < idx.length; f += 3) {
     const a = 3 * idx[f], b = 3 * idx[f + 1], c = 3 * idx[f + 2];
@@ -43,7 +43,7 @@ function castDown({ position: p, index: idx }, x, z) {
 // ---------- sweep helpers ----------
 // columns along a straight axis E from s0 to s1 (frame A, B across), section(s) -> [[a, b, r]], rounded capped ends
 // shrink: how far the end roll closes the section (rounded ends; near 1 closes it to a point)
-function bar(M, origin, E, A, B, s0, s1, section, seg, step, roll = 0.004, shrink = 0.45) {
+export function bar(M, origin, E, A, B, s0, s1, section, seg, step, roll = 0.004, shrink = 0.45) {
   const L = s1 - s0, ss = new Set();
   const n = Math.max(2, Math.ceil(L / step));
   for (let i = 0; i <= n; i++) ss.add(s0 + (L * i) / n);
@@ -58,7 +58,7 @@ function bar(M, origin, E, A, B, s0, s1, section, seg, step, roll = 0.004, shrin
   pushTube(M, rings);
 }
 // round tube along a polyline (closed loop or open with capped ends)
-function tube(M, path, r, segs, loop) {
+export function tube(M, path, r, segs, loop) {
   const n = path.length;
   const rings = path.map((p, i) => {
     const T = unit(sub(path[loop ? (i + 1) % n : Math.min(i + 1, n - 1)], path[loop ? (i + n - 1) % n : Math.max(i - 1, 0)]));

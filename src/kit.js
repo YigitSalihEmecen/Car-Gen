@@ -19,8 +19,8 @@ const unit = (a) => { const l = Math.hypot(...a) || 1; return [a[0] / l, a[1] / 
 const quarter = (t) => { t = clamp(t, 0, 1); return Math.sqrt(1 - (1 - t) ** 2); };
 const UP = [0, 1, 0];
 
-export const KIT_TYPES = ['None', 'Street', 'Track', 'Rugged'];
-export const KIT_SWEEP = ['paint', 'plastic', 'carbon', 'metal'];
+export const KIT_TYPES = ['None', 'Street', 'Track', 'Rugged', 'Rocket', 'Chrome'];
+export const KIT_SWEEP = ['paint', 'plastic', 'carbon', 'metal', 'bright', 'rubber'];
 export const KIT_LATHE = ['chrome', 'bolt', 'accent', 'dark'];
 
 // ---------- 2D section tools ----------
@@ -135,9 +135,19 @@ const skid = (c) => [[B0(c) + 0.02, c.yu + 0.004, 0], [0.015 * c.k, c.yu + 0.004
 // a slat proud of the main face at height y
 const slat = (main) => (c, y) => { const f = faceO(roundPoly(main(c), 3), y); return [[f - 0.006, y - 0.0035, 0], [f + 0.004, y - 0.0035, 0.0015], [f + 0.006, y + 0.0035, 0.0015], [f - 0.006, y + 0.0035, 0]]; };
 
+// oversized bolt-on ('Rocket'): the kit's outward scale blown up; every edge carries exposed bolts
+const RK = (c) => Math.min(2.1 * c.k, 2.4);
+const ROCKET_FRONT = (c) => shell(c, [[0.028 * RK(c), c.ya - 0.22 * c.H, 0.05], [0.05 * RK(c), c.yu + 0.035, 0.02], [0.042 * RK(c), c.yu + 0.014, 0.005], under(c, c.yu + 0.014)]);
+const ROCKET_SIDE = (c) => shell(c, [[0.03 * RK(c), c.ya - 0.25 * c.H, 0.04], [0.05 * RK(c), c.yu + 0.02, 0.012], [0.044 * RK(c), c.yu + 0.004, 0.004], under(c, c.yu + 0.004)]);
+const ROCKET_REAR = (c) => shell(c, [[0.024 * RK(c), c.ya - 0.25 * c.H, 0.05], [0.036 * RK(c), c.yu + 0.07, 0.02], [0.004, c.yu + 0.062, 0.004], under(c, c.yu + 0.062)]);
+// classic chrome: a blade bumper standing off the body, centred just below the attach height
+const bladeY = (c) => c.ya - 0.03;
+const BLADE = (c) => { const y = bladeY(c), o = 0.032 * c.k; return [[o, y - 0.036, 0.006], [o + 0.026, y - 0.03, 0.014], [o + 0.036, y, 0.02], [o + 0.026, y + 0.03, 0.014], [o, y + 0.036, 0.006], [o - 0.004, y, 0]]; };
+const CHROME_VALANCE = (c) => shell(c, [[0.006 * c.k, c.ya - 0.4 * c.H, 0.05], [0.01 * c.k, c.yu + 0.012, 0.01], [0.004, c.yu, 0.003], under(c, c.yu)]);
+
 // each piece: parts [{ mat, sec(c), s: [s0, s1], top: blend attaches here }], details(ctx) for instanced hardware
 const DESIGNS = [null,
-  { // Street: smooth painted valances with a black lip; front corner vents, twin exhaust tips at the rear
+  { // Street: smooth painted valances with a black lip; front corner vents (exhaust tips are their own option)
     front: {
       parts: [{ mat: 'paint', sec: STREET_FRONT, top: true },
         { mat: 'plastic', sec: (c) => [[0.004 * c.k, c.yu + 0.02, 0], [0.044 * c.k, c.yu + 0.01, 0.003], [0.046 * c.k, c.yu, 0.003], [B0(c) + 0.01, c.yu, 0], [B0(c) + 0.01, c.yu + 0.02, 0]] },
@@ -147,12 +157,6 @@ const DESIGNS = [null,
     rear: {
       parts: [{ mat: 'paint', top: true, sec: (c) => shell(c, [[0.012 * c.k, c.ya - 0.35 * c.H, 0.07], [0.016 * c.k, c.yu + 0.022, 0.015], [0.004 * c.k, c.yu + 0.01, 0.006], under(c, c.yu + 0.01)]) },
         { mat: 'plastic', s: [0, 0.6], sec: (c) => [[-0.002, c.yu + 0.016, 0], [0.012 * c.k, c.yu + 0.012, 0.003], [0.01 * c.k, c.yu + 0.002, 0.002], [B0(c) + 0.01, c.yu, 0], [B0(c) + 0.01, c.yu + 0.016, 0]] }],
-      details: ({ at, lathes }) => {
-        const { G, O, T, c, face } = at(0.74, (cc) => cc.yu + 0.3 * cc.H), r = clamp(0.16 * c.H, 0.026, 0.042);
-        const C = add([G[0], c.yu + 0.3 * c.H, G[2]], mul(O, face + 0.018));
-        place(lathes.chrome, C, T, UP, O, (L) => lathe(L, 0, 0, [[r, -0.12], [r, 0], [r * 0.96, 0.006], [r * 0.88, 0.004], [r * 0.88, -0.03]], 24));
-        place(lathes.dark, C, T, UP, O, (L) => lathe(L, 0, 0, [[r * 0.88, -0.03], [0, -0.03]], 24));
-      },
     },
   },
   { // Track: painted extensions over carbon aero: splitter with end plates and canards, skirt blades, a straked diffuser
@@ -198,7 +202,61 @@ const DESIGNS = [null,
       details: (ctx) => { hooks(ctx, 0.36); bolts(ctx, RUGGED, 0.28, 0.14); },
     },
   },
+  { // Rocket: an oversized bolt-on widebody kit: a deep chin over a big splitter, canards, thick skirts on wide blades,
+    // a towering rear valance over a tall-finned diffuser, bolts along every edge
+    front: {
+      parts: [{ mat: 'paint', sec: ROCKET_FRONT, top: true },
+        { mat: 'plastic', sec: (c) => plate(c, B0(c) + 0.02, Math.min(0.1 * c.k, 0.12), c.yu + 0.002, c.yu + 0.016, 0.004) }],
+      details: (ctx) => { canards(ctx, 1.5); bolts(ctx, ROCKET_FRONT, 0.2, 0.09); },
+    },
+    side: {
+      parts: [{ mat: 'paint', sec: ROCKET_SIDE, top: true }, { mat: 'plastic', sec: (c) => plate(c, B0(c) + 0.02, Math.min(0.1 * c.k, 0.12), c.yu, c.yu + 0.008, 0.004) }],
+      details: (ctx) => bolts(ctx, ROCKET_SIDE, 0.3, 0.1),
+    },
+    rear: {
+      parts: [{ mat: 'paint', top: true, sec: ROCKET_REAR },
+        { mat: 'carbon', s: [0, 0.8], sec: (c) => [[-0.24, c.yu + 0.003, 0], [0.04 * c.k, c.yu + 0.06, 0.003], [0.04 * c.k, c.yu + 0.068, 0.003], [-0.24, c.yu + 0.011, 0]] }],
+      details: (ctx) => {
+        const { at, sweeps, fin } = ctx;
+        for (const s of [0, 0.18, 0.36, 0.54, 0.72]) {
+          const a = at(s, (c) => c.ya);
+          fin(sweeps.carbon, a, a.T, 0.006, [[-0.2, a.c.yu + 0.012, 0], [0.04 * a.c.k, a.c.yu + 0.064, 0.003], [0.04 * a.c.k, a.c.yu + 0.026, 0.004], [-0.2, a.c.yu + 0.005, 0]]);
+        }
+        bolts(ctx, ROCKET_REAR, 0.25, 0.1);
+      },
+    },
+  },
+  { // Chrome: classic blade bumpers standing off the body on brackets, rubber-faced overriders, chrome rocker strips
+    front: {
+      parts: [{ mat: 'paint', sec: CHROME_VALANCE, top: true }, { mat: 'bright', s: [0, 0.96], sec: BLADE }],
+      details: (ctx) => overriders(ctx, [0.34]),
+    },
+    side: {
+      parts: [{ mat: 'paint', top: true, sec: (c) => shell(c, [[0.006 * c.k, c.ya - 0.45 * c.H, 0.04], [0.01 * c.k, c.yu + 0.01, 0.006], [0.004, c.yu, 0.003], under(c, c.yu)]) },
+        { mat: 'bright', sec: (c) => { const y = c.ya - 0.012; return [[-0.006, y - 0.008, 0], [0.012 * c.k, y - 0.008, 0.003], [0.015 * c.k, y, 0.004], [0.012 * c.k, y + 0.008, 0.003], [-0.006, y + 0.008, 0]]; } }],
+    },
+    rear: {
+      parts: [{ mat: 'paint', sec: CHROME_VALANCE, top: true }, { mat: 'bright', s: [0, 0.96], sec: BLADE }],
+      details: (ctx) => overriders(ctx, [0.42]),
+    },
+  },
 ];
+function overriders({ at, sweeps, fin }, ss) {
+  for (const s of ss) {
+    const a = at(s, bladeY), y = bladeY(a.c), o = 0.032 * a.c.k;
+    // a bracket from inside the body to the blade's back, then a chrome guard with a rubber face
+    fin(sweeps.metal, a, a.T, 0.022, [[-0.02, y - 0.012, 0], [o + 0.004, y - 0.012, 0.002], [o + 0.004, y + 0.012, 0.002], [-0.02, y + 0.012, 0]]);
+    fin(sweeps.bright, a, a.T, 0.034, [[o + 0.01, y - 0.075, 0.012], [o + 0.058, y - 0.062, 0.016], [o + 0.062, y + 0.05, 0.016], [o + 0.01, y + 0.064, 0.012]]);
+    fin(sweeps.rubber, a, a.T, 0.022, [[o + 0.055, y - 0.05, 0.006], [o + 0.068, y - 0.045, 0.006], [o + 0.07, y + 0.035, 0.006], [o + 0.057, y + 0.04, 0.006]]);
+  }
+}
+function canards({ at, sweeps, fin }, big) {
+  for (const f of [0.45, 0.72]) {
+    const a = at(0.92, (c) => c.yu + f * c.H), y = a.c.yu + f * a.c.H, tilt = 0.18, Bv = add(mul(a.T, Math.cos(tilt)), mul(UP, Math.sin(tilt)));
+    fin(sweeps.carbon, { ...a, G: [a.G[0], 0, a.G[2]], base: [0, y] }, unit(cross(a.O, Bv)), 0.005,
+      [[a.face - 0.006, -0.07 * big, 0], [a.face + 0.06 * big, -0.035 * big, 0.008], [a.face + 0.068 * big, 0.016, 0.006], [a.face - 0.006, 0.02, 0]], Bv);
+  }
+}
 function hooks({ at, lathes }, s) {
   const a = at(s, (c) => c.yu + 0.42 * c.H), y = a.c.yu + 0.42 * a.c.H, C = add([a.G[0], y, a.G[2]], mul(a.O, a.face + 0.024));
   place(lathes.accent, C, a.O, UP, a.T, (L) => lathe(L, 0, 0, Array.from({ length: 13 }, (_, i) => { const t = (2 * Math.PI * i) / 12; return [0.022 + 0.0062 * Math.cos(t), 0.0062 * Math.sin(t)]; }), 20));
@@ -245,7 +303,7 @@ export function buildKit(P, body, detail = 1) {
   const cxF = Math.max(-(Ra + gap), body.xF + 0.15), cxR = Math.min(wb + Ra + gap, body.xR - 0.15);
   if (P.kitF && cxF <= -(Ra + 0.04)) pieces.push({ kind: 'front', D: DESIGNS[P.kitF].front, xw: 0, sx: -1, cx: cxF, ya: body.floorAt(body.xF + 0.12) + P.kitH, range: [body.xF - 0.05, 0.05] });
   if (P.kitS && xs1 - xs0 > 0.3) pieces.push({ kind: 'side', D: DESIGNS[P.kitS].side, ya: body.floorAt((xs0 + xs1) / 2) + 0.8 * P.kitH, range: [xs0 - 0.05, xs1 + 0.05] });
-  if (P.kitR && cxR >= wb + Ra + 0.04) pieces.push({ kind: 'rear', D: DESIGNS[P.kitR].rear, xw: wb, sx: 1, cx: cxR, ya: body.floorAt(body.xR - 0.12) + P.kitH, range: [wb - 0.05, body.xR + 0.05] });
+  if (P.kitR && cxR >= wb + Ra + 0.04) pieces.push({ kind: 'rear', D: DESIGNS[P.kitR].rear, xw: wb, sx: 1, cx: cxR, ya: Math.min(body.floorAt(body.xR - 0.12), body.rearFloor ?? Infinity) + P.kitH, range: [wb - 0.05, body.xR + 0.05] });
   // bumpers wrap forward into the arch: past the arch plane their lower edge follows a clearance circle around the wheel
   // (rC) and the part runs out where that circle meets its top; skipped when fender flares own that band
   const rC = Ra + 0.02, MINH = 0.035;

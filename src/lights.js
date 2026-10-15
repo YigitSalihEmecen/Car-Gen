@@ -323,7 +323,7 @@ export function bodyMesh({ position: p, N, RL, xF, xR }, end = 'front') {
   // walk on the skin in mesh coordinates, parallel-transporting the direction, until `stop(sample)` or the length is used
   const walk = (ci, cr, dir, len, stop) => {
     const path = [{ ci, cr, s: 0 }];
-    for (let s = 0, it = 0; s < len - 1e-6 && it < (len / STEP) * 3 + 400; it++) {
+    for (let s = 0, it = 0; s < len - 1e-6 && it < (len / STEP) * 3 + 4000; it++) {
       const A = surf(ci, cr);
       dir = unit(sub(dir, mul(A.n, dot(dir, A.n))));
       const d = mul(dir, Math.min(STEP, len - s));
@@ -380,6 +380,12 @@ export function mirrored(p, i, nrm) {
   return out;
 }
 
+// lateral position of the headlamp bezel's inboard edge (for parts between the lamps); null when no posed lamps
+export function lampInner(P, W0) {
+  const S = SHAPES[P.hlType];
+  return S ? P.hlZ * W0 - S.a * P.hlSize - 0.6 * P.hlBlend : null;
+}
+
 export const LAMP_PARTS = ['housing', 'chrome', 'lens', 'glass', 'led', 'amber', 'red', 'tint', 'white'];
 const FRONT = 1.6, LIP = 0.003, REACH = 0.6, MAX_BACK = 0.2, OVERLAP = 0.006, GRAZE = 0.35, CLEAR = 0.01, STEP = 0.008;
 
@@ -391,19 +397,24 @@ function buildLamps(P, body, detail = 1, end = 'front') {
   const rear = end === 'rear', Q = (key) => P[(rear ? 'tl' : 'hl') + key], sx = rear ? 1 : -1;
   const S1 = (rear ? TAIL_SHAPES : SHAPES)[Q('Type')];
   if (!S1) return null;
-  const k = Q('Size'), S = { ...S1, a: S1.a * k, b: S1.b * k }, m = Q('Blend');
+  // a tail lamp is never taller than its face (crease to lip)
+  const fh = rear && body.tailFace ? body.tailFace[1] - body.tailFace[0] : Infinity;
+  let k = Math.min(Q('Size'), fh / (2.2 * S1.b * (1 + Math.abs(S1.skew)))), S, m, nO;
+  // ...and its bezel no wider than the room left above and below it on the face
+  const size = () => { S = { ...S1, a: S1.a * k, b: S1.b * k }; m = Math.min(Q('Blend'), Math.max(0.02, 0.5 * fh - S.b * (1 + Math.abs(S.skew)))); nO = lerp(S.n, 2, Q('Round') * clamp(m / (0.25 * (S.a + S.b)), 0, 1)); };
+  size();
   const { cast, surf, walk } = bodyMesh(body, end);
 
   const nT = lod(detail, 12, 128);
-  const sw = (Q('Sweep') * Math.PI) / 180, rk = (Q('Rake') * Math.PI) / 180;
+  // a tail lamp's rake is measured from its face: an undercut face tips its lamps down with it
+  const sw = (Q('Sweep') * Math.PI) / 180, rk = ((Q('Rake') - (rear ? body.faceRake || 0 : 0)) * Math.PI) / 180;
   const F = [sx * Math.cos(sw) * Math.cos(rk), Math.sin(rk), Math.sin(sw) * Math.cos(rk)];
   // u stays outboard and v up at either end (the rear frame is mirrored; lamp internals are double sided)
   const U0 = unit([-sx * F[2], 0, sx * F[0]]), V0 = rear ? cross(U0, F) : cross(F, U0);
   // angle: roll about the lamp axis; positive lifts the outboard end (the aggressive, slanted look), negative droops it
   const ra = (Q('Angle') * Math.PI) / 180, cr = Math.cos(ra), srl = Math.sin(ra);
   const U = add(mul(U0, cr), mul(V0, srl)), V = add(mul(U0, -srl), mul(V0, cr));
-  // outer edge relaxes toward an ellipse as hlRound grows, so wide bezels shed the lamp's sharp corners
-  const nO = lerp(S.n, 2, Q('Round') * clamp(m / (0.25 * (S.a + S.b)), 0, 1));
+  // (outer edge, nO: relaxes toward an ellipse as hlRound grows, so wide bezels shed the lamp's sharp corners)
 
   // pose: height and spread are plain car-frame numbers; only the depth is found, by one ray at the lamp centre.
   // Each rim point is projected onto the skin along the lamp axis (the seed); the bezel edge is then walked outward
@@ -424,20 +435,28 @@ function buildLamps(P, body, detail = 1, end = 'front') {
     return { O, toCar, cols, landed, ok: landed === nT };
   };
   // a lamp hanging past the body's edge cannot seat: slide it toward the middle of the end face until it does
-  const [zLo, zHi] = rear ? [P.tailBotZ, P.profile[6][1]] : [P.chinZ, P.profile[1][1]];
-  const yU = lerp(zLo, zHi, Q('H')), zU = Q('Z') * body.W0;
-  const yS = lerp(zLo, zHi, 0.5), zS = Math.min(zU, 0.45 * body.W0);
-  const at = (t, n = nT) => place(lerp(yU, yS, t), lerp(zU, zS, t), n);
-  let pose = at(0), fit = 0;
-  if (!pose.ok) {
-    let lo = 0, hi = 1;
-    for (let it = 0; it < 6; it++) { const mid = (lo + hi) / 2; if (at(mid, 32).ok) hi = mid; else lo = mid; }
-    for (fit = hi; !(pose = at(fit)).ok && fit < 1;) fit = Math.min(1, fit + 1 / 64);
+  // rear lamps live on the upper tail face (crease to lip): a bezel walked over the crease or a bumper step folds
+  const [zLo, zHi] = rear ? (body.tailFace || [P.tailBotZ, P.profile[6][1]]) : [P.chinZ, P.profile[1][1]];
+  // (a tail lamp's centre travels between the face's edges inset by its own half height, so the lamp always fits)
+  // ...and a lamp too big to seat even there shrinks until it does
+  let pose, fit = 0;
+  for (let tries = 0; tries < 6; tries++, k *= 0.88, size()) {
+    const bh = rear && body.tailFace ? Math.min(S.b * (1 + Math.abs(S.skew)), 0.45 * (zHi - zLo)) : 0;
+    const yU = lerp(zLo + bh, zHi - bh, Q('H')), zU = Q('Z') * body.W0;
+    const yS = lerp(zLo, zHi, 0.5), zS = Math.min(zU, 0.45 * body.W0);
+    const at = (t, n = nT) => place(lerp(yU, yS, t), lerp(zU, zS, t), n);
+    pose = at(0); fit = 0;
+    if (!pose.ok) {
+      let lo = 0, hi = 1;
+      for (let it = 0; it < 6; it++) { const mid = (lo + hi) / 2; if (at(mid, 32).ok) hi = mid; else lo = mid; }
+      for (fit = hi; !(pose = at(fit)).ok && fit < 1;) fit = Math.min(1, fit + 1 / 64);
+    }
+    if (pose.ok) break;
   }
   const { O, toCar, cols, landed } = pose;
 
   // skin walk stops at the centre line, at the nose tip, and where the skin turns away (rear-facing or underside)
-  const stopLamp = (B) => B.p[2] < CLEAR || dot(B.n, F) < -0.2 || B.n[1] < -0.6;
+  const stopLamp = (B) => B.p[2] < CLEAR || dot(B.n, F) < -0.2 || B.n[1] < -0.6 || (rear && body.tailFace && (B.p[1] < body.tailFace[0] || B.p[1] > body.tailFace[1] + 0.01));
   const paths = cols.map((c) => (c.seed ? walk(c.seed.ci, c.seed.cr, c.er, c.len, stopLamp) : null));
   // columns that had to stop early pull their neighbours in smoothly instead of leaving a notch
   const reach = smoothLoop(cols.map((c, i) => (paths[i] ? paths[i][paths[i].length - 1].s / Math.max(c.len, 1e-6) : 0)), Math.ceil(nT / 16));
@@ -493,6 +512,10 @@ function buildLamps(P, body, detail = 1, end = 'front') {
     out[name] = mirrored(q, i);
   }
   // skin cut: the bezel edge (pulled in by OVERLAP) as a polygon in the body's (station, ring) coordinates
-  out.hole = landed === nT ? { poly, n: nT, box } : null;
+  // ...and its 3D bounds (right half): fan triangles at the tail tip span many rings in a tiny area, so the (station,
+  // ring) test alone could punch slits far from the lamp
+  const b3 = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity];
+  for (let q = 0; q < bp.length; q += 3) for (let a = 0; a < 3; a++) { b3[a] = Math.min(b3[a], bp[q + a]); b3[a + 3] = Math.max(b3[a + 3], bp[q + a]); }
+  out.hole = landed === nT ? { poly, n: nT, box, box3: b3.map((v, a) => v + (a < 3 ? -0.01 : 0.01)) } : null;
   return out;
 }

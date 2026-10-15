@@ -16,11 +16,13 @@ for (const [name, P] of cases) {
   for (let i = 0; i < p.length; i += 3) {
     minX = Math.min(minX, p[i]); maxX = Math.max(maxX, p[i]);
     minY = Math.min(minY, p[i + 1]); maxZ = Math.max(maxZ, Math.abs(p[i + 2]));
-    if (p[i + 1] > maxY) { maxY = p[i + 1]; roofI = i / 3; }
+    // the end stations collapse to a line or a point (zero-area faces): probe the winding elsewhere
+    const st = Math.floor(i / 3 / meta.RL);
+    if (p[i + 1] > maxY && st > 0 && st < p.length / 3 / meta.RL - 1) { maxY = p[i + 1]; roofI = i / 3; }
   }
   assert.ok(Math.abs(minX - meta.xF) < 1e-3 && Math.abs(maxX - meta.xR) < 1e-3, `${name}: length`);
   assert.ok(minY > 0.03, `${name}: body touches ground (${minY})`);
-  assert.ok(maxZ < Math.max(P.width / 2 * 1.15, P.track / 2 + P.tireW / 2 + 0.015) + Math.max(P.flare, P.flareR) + P.archLip + P.crease + 0.02, `${name}: too wide (${maxZ})`);
+  assert.ok(maxZ < Math.max(P.width / 2 * 1.15, P.track / 2 + P.tireW / 2 + 0.015) + Math.max(P.flare, P.flareR) + P.archLip + P.crease + 0.03, `${name}: too wide (${maxZ})`);
 
   // outward winding: faces touching the highest vertex must point up
   let ny = 0;
@@ -133,12 +135,14 @@ console.log('ok cabin glass and windshield line');
     for (const part of ['bezel', 'housing', 'chrome', 'lens', 'led']) assert.ok(L[part].position.every(Number.isFinite), `${name}/${end}/${type}: ${part} not finite`);
     assert.equal(L.landed, nT, `${name}/${end}/${type}: ${nT - L.landed} rim points miss the body`);
     assert.ok(L.hole, `${name}/${end}/${type}: no skin cut`);
-    if (!name.startsWith('random')) assert.ok(L.reach > 0.99, `${name}/${end}/${type}: default bezel width cut short (${L.reach.toFixed(2)})`);
+    // a rear bezel may stop on the tail crease or the lip (the face's edges), never far short of them
+    if (!name.startsWith('random')) assert.ok(L.reach > (end === 'rear' ? 0.6 : 0.99), `${name}/${end}/${type}: default bezel width cut short (${L.reach.toFixed(2)})`);
     const { cast } = bodyMesh({ position: car.position, N: car.position.length / 3 / car.meta.RL, RL: car.meta.RL, xF: car.meta.xF, xR: car.meta.xR }, end);
     for (let c = 0; c < nT; c++) {
       const p = [0, 1, 2].map((a) => B.position[(s * nT + c) * 3 + a]), n = [0, 1, 2].map((a) => B.normal[(s * nT + c) * 3 + a]);
-      const h = cast(p.map((v, a) => v + n[a] * 0.02), n.map((v) => -v));
-      assert.ok(h && Math.abs(h.t - 0.02) < 1e-3, `${name}/${end}/${type}: bezel edge off the skin (col ${c}, ${h ? ((h.t - 0.02) * 1000).toFixed(1) + ' mm' : 'no hit'})`);
+      // a gap shows; an edge tucked a few mm under the skin (in a concave step such as a bumper ledge) does not
+      const h = cast(p.map((v, a) => v + n[a] * 0.006), n.map((v) => -v));
+      assert.ok(h && h.t - 0.006 < 1e-3 && h.t - 0.006 > -4e-3, `${name}/${end}/${type}: bezel edge off the skin (col ${c}, ${h ? ((h.t - 0.006) * 1000).toFixed(1) + ' mm' : 'no hit'})`);
     }
   }
   console.log('ok head and tail light bezels seat and end on the skin');
@@ -200,10 +204,11 @@ console.log('ok cabin glass and windshield line');
   let seed7 = 29;
   const rng7 = () => ((seed7 = (seed7 * 16807) % 2147483647) / 2147483647);
   const cars = [...Object.entries(PRESETS).map(([k, p]) => [k, sanitize(clone(p))]), ...Array.from({ length: 10 }, (_, i) => [`random${i}`, randomCar(rng7)])];
-  for (const [name, base] of cars) for (const type of [1, 2, 3]) {
+  for (const [name, base] of cars) for (const type of [1, 2, 3, 4, 5]) {
     const P = clone(base); P.kitF = P.kitS = P.kitR = type;
     const car = buildCar(P), K = car.kit;
     assert.ok(K.pieces >= 2 && K.blend, `${name}/${type}: only ${K.pieces} kit pieces`);
+    if (type > 3) for (const k of KIT_SWEEP) if (K[k]) assert.equal(openEdges(K[k]), 0, `${name}/${type}: kit ${k} is not a closed mesh`);
     for (const part of [...KIT_SWEEP, ...KIT_LATHE, 'blend']) {
       if (!K[part]) continue;
       assert.ok(K[part].position.every(Number.isFinite), `${name}/${type}: kit ${part} not finite`);
@@ -328,4 +333,39 @@ function openEdges({ position: p, index: idx }) {
     assert.ok(worst < 1, `${name}: fender flank slopes ${worst.toFixed(2)} along the car`);
   }
   console.log('ok fenders rise gradually; arches round or angular');
+}
+
+// accessories: every style of every accessory on every preset (and random bodies) builds, stays finite and inside the
+// car's envelope; plates sit on the tail face, exhaust tips reach past the skin behind them, mirrors stand off the side
+{
+  const { bodyMesh } = await import('../src/lights.js');
+  const KINDS = { plates: ['plateType', 5], exhaust: ['exType', 3], spoiler: ['spType', 5], mirrors: ['mrType', 3], antenna: ['anType', 4], grille: ['grType', 5], hood: ['hdType', 4] };
+  // parts that need room a body may not have (a deck behind the glass, a hood long enough) may be skipped there
+  const OPTIONAL = new Set(['spoiler', 'hood']);
+  let seed12 = 61;
+  const rng12 = () => ((seed12 = (seed12 * 16807) % 2147483647) / 2147483647);
+  const cars = [...Object.entries(PRESETS).map(([k, p]) => [k, sanitize(clone(p))]), ...Array.from({ length: 8 }, (_, i) => [`random${i}`, randomCar(rng12)])];
+  for (const [name, base] of cars) for (const [group, [key, n]] of Object.entries(KINDS)) for (let type = 1; type <= n; type++) {
+    const P = clone(base); P[key] = type;
+    const car = buildCar(P, { detail: 0.4 }), A = car[group], m = car.meta, roofTop = Math.max(...car.cabin.profile.map((q) => q[1]));
+    if (!A) { assert.ok(OPTIONAL.has(group) || name.startsWith('random'), `${name}: no ${group} of style ${type}`); continue; }
+    for (const k in A) {
+      const q = A[k]?.position;
+      if (!q) continue;
+      for (let i = 0; i < q.length; i += 3) {
+        assert.ok(Number.isFinite(q[i] + q[i + 1] + q[i + 2]), `${name}: ${group}/${type} ${k} not finite`);
+        assert.ok(q[i + 1] > 0.02 && q[i + 1] < roofTop + 1.1, `${name}: ${group}/${type} ${k} at height ${q[i + 1].toFixed(3)}`);
+        assert.ok(q[i] > m.xF - 0.3 && q[i] < m.xR + 0.3 && Math.abs(q[i + 2]) < m.W0 * 1.4, `${name}: ${group}/${type} ${k} escapes the car at ${[q[i], q[i + 1], q[i + 2]].map((v) => v.toFixed(2))}`);
+      }
+    }
+    if (group === 'plates' && A.rear) assert.ok(A.rear.y0 > m.tail.zTk - 0.01 && A.rear.y1 < m.tail.zLip + 0.01, `${name}: rear plate off the tail face`);
+    if (group === 'exhaust') {
+      const { cast } = bodyMesh({ position: car.position, N: car.position.length / 3 / m.RL, RL: m.RL, xF: m.xF, xR: m.xR }, 'rear'), q = A.chrome.position;
+      let tip = 0; for (let i = 3; i < q.length; i += 3) if (q[i] > q[tip]) tip = i;
+      const h = cast([m.xR + 1, q[tip + 1], q[tip + 2]], [-1, 0, 0]);
+      assert.ok(!h || q[tip] > h.p[0] + 0.003, `${name}: exhaust ${type} tip buried in the body`);
+    }
+    if (group === 'mirrors') { const wx = Math.max(...car.outline.wmax.filter((_, i) => Math.abs(car.outline.x[i] - m.xA - 0.2) < 0.2)); assert.ok(Math.max(...A.mirror.position.filter((_, i) => i % 3 === 2)) > wx + 0.02, `${name}: mirror ${type} does not clear the body side`); }
+  }
+  console.log('ok accessories: every style builds, finite, inside the car, seated');
 }

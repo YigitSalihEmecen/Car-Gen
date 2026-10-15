@@ -26,6 +26,8 @@ export function upperFairness(P, opts) {
   const n = normals(p, index);
   let worst = 0, at = null;
   for (let q = bf + bc + belt; q < H; q++) for (let i = 1; i < N - 1; i++) {
+    // the end caps (sections collapsing to the nose / tail tip) have no surface to be fair
+    if (outline.wmax[i] < 0.03 || outline.x[i] > meta.xTail) continue;
     const a = ((i - 1) * RL + q) * 3, b = (i * RL + q) * 3, c = ((i + 1) * RL + q) * 3;
     if ([a, b, c].some((v) => nearArch(p[v], p[v + 1]))) continue;
     const mx = n[a] + n[c], my = n[a + 1] + n[c + 1], mz = n[a + 2] + n[c + 2], ml = Math.hypot(mx, my, mz) || 1;

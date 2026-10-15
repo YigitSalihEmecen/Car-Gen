@@ -21,7 +21,7 @@ const blur = (a, s) => a.map((_, i) => { let w = 0, v = 0; for (let k = -3 * s; 
 // returns { housing, core, lens } (right half mirrored) or null; end: 'front' | 'rear'
 export function buildLightBar(P, body, detail = 1, end = 'front') {
   const rear = end === 'rear', Q = (k) => P[(rear ? 'tl' : 'hl') + k], sx = rear ? 1 : -1;
-  const [zLo, zHi] = rear ? [P.tailBotZ, P.profile[6][1]] : [P.chinZ, P.profile[1][1]];
+  const [zLo, zHi] = rear ? (body.tailFace || [P.tailBotZ, P.profile[6][1]]) : [P.chinZ, P.profile[1][1]];
   const y = lerp(zLo, zHi, Q('H')), hb = 0.009 * Q('Size');
   const { cast } = bodyMesh(body, end);
   // fan of rays from inside the car at the bar height; the bar wraps round the corners until the skin has turned away

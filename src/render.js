@@ -8,6 +8,10 @@ import { buildCar, sanitize } from './car.js';
 import { KIT_SWEEP, KIT_LATHE } from './kit.js';
 import { makeWheel } from './wheels.js';
 import { ROOF_PARTS } from './roof.js';
+import { ACC_MATS } from './acc.js';
+
+// accessory groups in a buildCar() result; each is { [material key]: mesh } (see acc.js)
+export const ACCESSORIES = ['plates', 'exhaust', 'spoiler', 'mirrors', 'antenna', 'grille', 'hood'];
 
 const HOLE_MAX = 256; // per lamp pair; the texture holds the headlight polygon, then the tail-light polygon
 
@@ -18,6 +22,7 @@ function makePaint() {
     uZebra: { value: 0 },
     uHPoly: { value: new THREE.DataTexture(new Float32Array(HOLE_MAX * 8), HOLE_MAX * 2, 1, THREE.RGBAFormat, THREE.FloatType) },
     uHN: { value: 0 }, uHBox: { value: new THREE.Vector4() }, uTN: { value: 0 }, uTBox: { value: new THREE.Vector4() }, uRL: { value: 0 },
+    uH3: { value: [new THREE.Vector3(), new THREE.Vector3()] }, uT3: { value: [new THREE.Vector3(), new THREE.Vector3()] },
   };
   const paint = new THREE.MeshPhysicalMaterial({ clearcoat: 1, clearcoatRoughness: 0.06 });
   paint.onBeforeCompile = (sh) => {
@@ -32,7 +37,7 @@ function makePaint() {
       .replace('#include <common>', `#include <common>
         varying vec3 vOP; varying vec3 vON; varying float vT; varying float vBelt; varying vec2 vIR;
         uniform vec4 uT, uEnds, uWheel, uOpt, uMisc; uniform float uZebra;
-        uniform sampler2D uHPoly; uniform int uHN, uTN; uniform vec4 uHBox, uTBox; uniform float uRL;
+        uniform sampler2D uHPoly; uniform int uHN, uTN; uniform vec4 uHBox, uTBox; uniform float uRL; uniform vec3 uH3[2], uT3[2];
         // even-odd test against a lamp bezel edge, a polygon in the body's (station, ring) coordinates
         bool inPoly(vec2 p, int off, int n, vec4 box) {
           if (n == 0 || any(lessThan(p, box.xy)) || any(greaterThan(p, box.zw))) return false;
@@ -44,7 +49,11 @@ function makePaint() {
           }
           return inside;
         }
-        bool inHole(vec2 p) { return inPoly(p, 0, uHN, uHBox) || inPoly(p, ${HOLE_MAX}, uTN, uTBox); }
+        bool in3(vec3 q, vec3 lo, vec3 hi) { return all(greaterThanEqual(q, lo)) && all(lessThanEqual(q, hi)); }
+        bool inHole(vec2 p) {
+          vec3 q = vec3(vOP.x, vOP.y, abs(vOP.z));
+          return (in3(q, uH3[0], uH3[1]) && inPoly(p, 0, uHN, uHBox)) || (in3(q, uT3[0], uT3[1]) && inPoly(p, ${HOLE_MAX}, uTN, uTBox));
+        }
         float aaw(float v){ return fwidth(v) * 0.75 + 1e-5; }
         float above(float v, float a){ float w = aaw(v); return smoothstep(a - w, a + w, v); }
         float archH(float u){ return uMisc.z > 0.5 ? min(1.0, (1.0 - u) * 2.2) : sqrt(max(1.0 - u * u, 0.0)); }
@@ -56,7 +65,8 @@ function makePaint() {
         float x = vOP.x, y = vOP.y;
         // wheel wells, underbody, cladding
         float well = inArches(x, y, uWheel.w + 0.004) * (1.0 - above(vT, uT.z));
-        float under = smoothstep(-0.25, -0.6, vON.y) * (1.0 - above(vT, 1.5));
+        // only true undersides: tucked and undercut tail faces lean down too, but stay painted
+        float under = smoothstep(-0.7, -0.88, vON.y) * (1.0 - above(vT, 1.5));
         float clad = uOpt.x > 0.001 ? max((inArches(x, y, uWheel.w + uOpt.x) - inArches(x, y, uWheel.w - 0.01)) * (1.0 - above(y, vBelt - 0.08)), 1.0 - above(y, uEnds.w + uOpt.x * 1.5)) : 0.0;
         float trim = max(well, max(under, clad));
         diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.035, 0.04, 0.045), trim);
@@ -113,6 +123,19 @@ export function createMaterials() {
       metal: std({ color: 0xb4b8bd, metalness: 1, roughness: 0.34 }),
       accent: std({ color: 0xc4211a, metalness: 0.2, roughness: 0.4, side: THREE.DoubleSide }),
       dark: std({ color: 0x0b0b0c, roughness: 0.9, side: THREE.DoubleSide }),
+      bright: lamp.chrome, rubber,
+    },
+    // accessories: 'paint' is the body paint (set per update); the rest are their own finishes
+    acc: {
+      chrome: lamp.chrome, plastic, rubber, dark: std({ color: 0x0b0b0c, roughness: 0.9, side: THREE.DoubleSide }),
+      black: phys({ color: 0x0c0d0f, metalness: 0.1, roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.05 }),
+      metal: std({ color: 0xb9bdc2, metalness: 1, roughness: 0.3 }),
+      carbon: phys({ color: 0x15171a, metalness: 0.25, roughness: 0.3, clearcoat: 1, clearcoatRoughness: 0.04 }),
+      mirror: std({ color: 0xdfe6ee, metalness: 1, roughness: 0.03 }),
+      plate: std({ color: 0xf2f2ee, roughness: 0.38 }), plateY: std({ color: 0xf2c418, roughness: 0.38 }),
+      ink: std({ color: 0x121315, roughness: 0.5 }), inkG: std({ color: 0x1d5a2c, roughness: 0.5 }),
+      band: std({ color: 0x1c3f9c, roughness: 0.45 }), red: std({ color: 0xb3121a, roughness: 0.4 }),
+      amber: lamp.amber, burnt: std({ color: 0x5a4c7c, metalness: 1, roughness: 0.28, side: THREE.DoubleSide }),
     },
     roof: {
       plastic, rubber, lens: lamp.lens, led: lamp.led, chrome: lamp.chrome,
@@ -195,6 +218,8 @@ export class CarMesh {
       if (hole) {
         for (let i = 0; i < U[nU].value; i++) tex.image.data.set([hole.poly[2 * i], hole.poly[2 * i + 1]], 4 * (off + i));
         U[boxU].value.set(...hole.box);
+        U[key === 'front' ? 'uH3' : 'uT3'].value[0].set(...hole.box3.slice(0, 3));
+        U[key === 'front' ? 'uH3' : 'uT3'].value[1].set(...hole.box3.slice(3));
       }
       this._part(`bezel_${key}`, set?.bezel, M.paint, 2);
       for (const k in M.lamp) this._part(`lamp_${key}_${k}`, set?.[k], M.lamp[k]);
@@ -222,6 +247,12 @@ export class CarMesh {
     // roof attachment: swept parts carry normals, lathed details get computed ones
     const rack = built.rack;
     for (const k of ROOF_PARTS) { this._part(`roof_${k}`, rack?.[k], M.roof[k]); this._part(`roof_${k}_l`, rack?.[`${k}_l`], M.roof[k]); }
+
+    // accessories: painted parts use the body paint with body-only masks off
+    for (const g of ACCESSORIES) for (const k of ACC_MATS) {
+      const paint = k === 'paint';
+      this._part(`${g}_${k}`, built[g]?.[k], paint ? M.paint : M.acc[k], paint ? 2 : undefined);
+    }
 
     // wheels: rebuilt only when their shape changes
     const key = [P.wheelR, P.tireW, P.rimRatio, P.spokes, P.rimType, detail].join();

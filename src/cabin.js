@@ -140,13 +140,31 @@ export function buildCabin(P, B) {
   const center = [xMid, deck(xMid) - 0.4, 0];
   const Hw = Math.max(0.08, roof(xMid) - rr - deck(xMid));
 
-  // Width model: the base follows the body's shoulder line (minus the ledge) along the whole cabin, so the glass house
-  // grows out of the body instead of sitting on a shelf; the roof width comes from the cabin plan; a concave cove
-  // (`cabinBlend`) flares the foot of the wall into the shoulder.
-  const baseW = (x) => {
-    const t = clamp((x - xA) / Math.max(xC - xA, 1e-3), 0, 1);
-    return Math.max(0.08, Math.min(flatW(x) - P.ledge, W0 * lerp(c[0], c[3], t)));
-  };
+  // Width model: the glass house is its own engineered volume. Its base is a straight line in plan from the windshield
+  // base to the backlight base (the cabin plan widths), pulled in as little as needed to stay inside the body's shoulder
+  // (minus the ledge) everywhere; it never traces the shoulder's local bulges and dips, which made the pillars ripple
+  // with every fender and crease below them. The roof width comes from the cabin plan; a concave cove of one size
+  // (`cabinBlend`) flares the foot of the wall toward the shoulder.
+  const tOf = (x) => clamp((x - xA) / Math.max(xC - xA, 1e-3), 0, 1), NSB = 32;
+  const xsB = Array.from({ length: NSB + 1 }, (_, i) => lerp(xA, xC, i / NSB)), roomW = xsB.map((x) => flatW(x) - P.ledge);
+  let wa = W0 * c[0], wc = W0 * c[3];
+  // least-change fit of the two end widths so the line clears the shoulder at every sample
+  for (let it = 0; it < 40; it++) {
+    let worst = 0, tw = 0;
+    xsB.forEach((x, i) => { const t = tOf(x), v = lerp(wa, wc, t) - roomW[i]; if (v > worst) { worst = v; tw = t; } });
+    if (worst < 1e-5) break;
+    const nn = (1 - tw) ** 2 + tw ** 2;
+    wa -= (worst * (1 - tw)) / nn; wc -= (worst * tw) / nn;
+  }
+  const baseW = (x) => Math.max(0.08, lerp(wa, wc, tOf(x)));
+  const coveW = clamp(Math.min(...xsB.map((x, i) => roomW[i] + P.ledge - 0.006 - baseW(x))), 0, P.cabinBlend);
+  // side view: the beltline under the glass is a straight line (least squares through the deck at the base), and the
+  // deck's lateral shape (its crown) is kept relative to it. Only the foot band conforms to the real deck; above it the
+  // wall runs as one ruled surface from that clean base to the roof, so pillars bend, if at all, uniformly
+  const dSide = xsB.map((x) => deckAt(x, baseW(x))), tm = xsB.map(tOf), mt = tm.reduce((a, b) => a + b, 0) / tm.length, md = dSide.reduce((a, b) => a + b, 0) / dSide.length;
+  const slopeB = tm.reduce((a, t, i) => a + (t - mt) * (dSide[i] - md), 0) / Math.max(tm.reduce((a, t) => a + (t - mt) ** 2, 0), 1e-9);
+  const beltAt = (x) => md + slopeB * (tOf(x) - mt);
+  const cleanDeck = (x, lat) => beltAt(x) + deckAt(x, Math.min(lat, baseW(x))) - deckAt(x, baseW(x));
   const roofW = (x) => {
     const t = clamp((x - xRF) / Math.max(xRR - xRF, 1e-3), 0, 1);
     return Math.min(W0 * lerp(c[1], c[2], t), baseW(x));
@@ -166,7 +184,7 @@ export function buildCabin(P, B) {
   const roofCrown = Math.min(P.roofCrown * kW, bowCap(2 * wMidRoof, R_ROOF));
 
   const widthAt = (x, f, inset) => {
-    const b = baseW(x), cove = Math.max(0, Math.min(P.cabinBlend, flatW(x) - 0.006 - b));
+    const b = baseW(x), cove = coveW;
     const t = clamp(f / fb, 0, 1);
     return Math.max(0.04, lerp(b, roofW(x), f) + sideBow * Math.sin(Math.PI * f) + cove * (1 - t) * (1 - t) - inset);
   };
@@ -196,7 +214,11 @@ export function buildCabin(P, B) {
     return [x, yOf(x, Math.abs(lat)), lat];
   };
   // every wall point stands on the body's real top surface at its own lateral position (no floating base, no skirt step)
-  const wallY = (f) => (x, lat) => { const b = deckAt(x, lat); return b + f * (roof(x) - rr - b); };
+  const wallY = (f) => (x, lat) => {
+    const real = deckAt(x, lat), clean = cleanDeck(x, lat), g = f >= 2 * fb ? 1 : (f / (2 * fb)) ** 2 * (3 - 2 * f / (2 * fb));
+    const b = lerp(real, clean, g);
+    return b + f * (roof(x) - rr - b);
+  };
   const ring = (sl, yOf) => Array.from({ length: M }, (_, i) => pt(sl, (2 * Math.PI * i) / M, yOf));
 
   // ---------- skin ----------
@@ -296,8 +318,12 @@ export function buildCabin(P, B) {
   };
   const sA = (t) => uAt(t / Ts, NQ / 2) - uAt(t / Ts, NQ / 4);
   const sC = (t) => uAt(t / Ts, NQ / 2) - uAt(t / Ts, (3 * NQ) / 4);
-  const front = straight((t) => sA(t) - aW / 2);
-  const rear = straight((t) => sC(t) + cW(t / Ts));
+  // the edges are straight but the pillar axes bow with the glass: a second pass moves each edge out by the shortfall
+  const tt = Array.from({ length: 9 }, (_, i) => t0 + ((t1 - t0) * i) / 8);
+  const f0 = straight((t) => sA(t) - aW / 2), dA = Math.max(0, ...tt.map((t) => aW / 2 - (sA(t) - f0(t))));
+  const front = dA > 1e-4 ? straight((t) => sA(t) - aW / 2 - dA) : f0;
+  const r0 = straight((t) => sC(t) + cW(t / Ts)), dC = Math.max(0, ...tt.map((t) => MIN_C - (r0(t) - sC(t))));
+  const rear = dC > 1e-4 ? straight((t) => sC(t) + cW(t / Ts) + dC) : r0;
   const KS = 8, ts = Array.from({ length: KS + 1 }, (_, i) => t0 + ((t1 - t0) * i) / KS);
   const slopeF = (front(t1) - front(t0)) / (t1 - t0), slopeR = (rear(t1) - rear(t0)) / (t1 - t0);
   // side pillar centre lines: chart end points s = a + b t at the sill and header, straight in side view between
