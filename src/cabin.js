@@ -31,6 +31,9 @@ const NQ = 96, FQ = 24;
 // engineered limits: glass is never bent tighter than these radii (m), pillars never thinner than these widths (m)
 const R_SIDE = 1.6, R_SHIELD = 2.0, R_WRAP = 1.4, R_ROOF = 3.0;
 export const MIN_A = 0.06, MIN_PILLAR = 0.05, MIN_C = 0.07;
+// proportions held whatever the plan asks: base at most BASE_GAP inside the shoulder, side glass leaning in by a
+// tumblehome angle in [TUMBLE_MIN, TUMBLE_MAX]
+const BASE_GAP = 0.1, MIN_WIN = [0.3, 0.22], WIN_R = 0.04, TUMBLE_MIN = (6 * Math.PI) / 180, TUMBLE_MAX = (20 * Math.PI) / 180;
 // largest bow (sagitta) a span may carry without dropping below radius R
 const bowCap = (span, R) => (span * span) / (8 * R);
 
@@ -82,16 +85,25 @@ function clipHalf(poly, a, b, d, side) {
   }
   return out;
 }
-function chamfer(poly, c) {
-  if (c < 0.004) return poly;
+// every real corner of a closed polygon replaced by a circular arc of radius r (limited to what its edges allow), so
+// every window has the same rounded corners; nearly straight vertices pass through
+function roundCorners(poly, r, seg) {
+  if (r < 0.004 || seg < 1) return poly;
   const n = poly.length, out = [];
   for (let i = 0; i < n; i++) {
-    const a = poly[(i + n - 1) % n], b = poly[i], d = poly[(i + 1) % n];
-    const e0 = [a[0] - b[0], a[1] - b[1]], e1 = [d[0] - b[0], d[1] - b[1]], l0 = Math.hypot(...e0), l1 = Math.hypot(...e1);
-    const turn = (b[0] - a[0]) * (d[1] - b[1]) - (b[1] - a[1]) * (d[0] - b[0]);
-    if (l0 < 1e-6 || l1 < 1e-6 || Math.abs(turn) < 1e-6) { out.push(b); continue; }
-    const cc = Math.min(c, 0.45 * Math.min(l0, l1));
-    out.push([b[0] + (e0[0] / l0) * cc, b[1] + (e0[1] / l0) * cc], [b[0] + (e1[0] / l1) * cc, b[1] + (e1[1] / l1) * cc]);
+    const a = poly[(i + n - 1) % n], b = poly[i], c = poly[(i + 1) % n];
+    const la = Math.hypot(a[0] - b[0], a[1] - b[1]), lc = Math.hypot(c[0] - b[0], c[1] - b[1]);
+    if (la < 1e-6 || lc < 1e-6) continue;
+    const u = [(a[0] - b[0]) / la, (a[1] - b[1]) / la], v = [(c[0] - b[0]) / lc, (c[1] - b[1]) / lc];
+    const th = Math.acos(clamp(u[0] * v[0] + u[1] * v[1], -1, 1));
+    if (th > Math.PI - 0.08) { out.push(b); continue; }
+    const d = Math.min(r / Math.tan(th / 2), 0.45 * la, 0.45 * lc), rr = d * Math.tan(th / 2);
+    const bis = [u[0] + v[0], u[1] + v[1]], bl = Math.hypot(...bis), cd = rr / Math.sin(th / 2), o = [b[0] + (bis[0] / bl) * cd, b[1] + (bis[1] / bl) * cd];
+    const a0 = Math.atan2(b[1] + u[1] * d - o[1], b[0] + u[0] * d - o[0]);
+    let da = Math.atan2(b[1] + v[1] * d - o[1], b[0] + v[0] * d - o[0]) - a0;
+    if (da > Math.PI) da -= 2 * Math.PI; if (da < -Math.PI) da += 2 * Math.PI;
+    const m = Math.max(1, Math.round((seg * (Math.PI - th)) / (Math.PI / 2)));
+    for (let k = 0; k <= m; k++) out.push([o[0] + rr * Math.cos(a0 + (da * k) / m), o[1] + rr * Math.sin(a0 + (da * k) / m)]);
   }
   return out;
 }
@@ -128,7 +140,7 @@ export function buildCabin(P, B) {
   const { xA, xRF, xRR, xC, W0, deck, deckAt, flatW } = B;
   // tessellation: M ring points (multiple of 8 keeps the A / C corners on vertices), K wall levels, JR roof-roll rings
   const d = clamp(B.detail ?? 1, 0, 1), dl = d ** 1.5;
-  const M = 8 * Math.round(lerp(2, 32, dl)), K = Math.round(lerp(2, 14, dl)), JR = d < 0.3 ? 1 : d < 0.7 ? 2 : 3;
+  const M = 8 * Math.round(lerp(2, 32, dl)), K = Math.round(lerp(2, 20, dl)), JR = d < 0.3 ? 1 : d < 0.7 ? 2 : 3;
   const zRF = P.profile[3][1], zRR = P.profile[4][1];
   const roof = (x) => {
     const t = (x - xRF) / Math.max(xRR - xRF, 0.05), tc = clamp(t, 0, 1);
@@ -140,23 +152,29 @@ export function buildCabin(P, B) {
   const center = [xMid, deck(xMid) - 0.4, 0];
   const Hw = Math.max(0.08, roof(xMid) - rr - deck(xMid));
 
-  // Width model: the glass house is its own engineered volume. Its base is a straight line in plan from the windshield
-  // base to the backlight base (the cabin plan widths), pulled in as little as needed to stay inside the body's shoulder
-  // (minus the ledge) everywhere; it never traces the shoulder's local bulges and dips, which made the pillars ripple
-  // with every fender and crease below them. The roof width comes from the cabin plan; a concave cove of one size
+  // Width model: the glass house is its own engineered volume. Its base follows the cabin plan widths, pulled in as
+  // little as needed to stay inside the body's shoulder (minus the ledge) everywhere; it never traces the shoulder's local
+  // bulges and dips, which made the pillars ripple with every fender and crease below them. The roof width comes from the cabin plan; a concave cove of one size
   // (`cabinBlend`) flares the foot of the wall toward the shoulder.
   const tOf = (x) => clamp((x - xA) / Math.max(xC - xA, 1e-3), 0, 1), NSB = 32;
   const xsB = Array.from({ length: NSB + 1 }, (_, i) => lerp(xA, xC, i / NSB)), roomW = xsB.map((x) => flatW(x) - P.ledge);
-  let wa = W0 * c[0], wc = W0 * c[3];
-  // least-change fit of the two end widths so the line clears the shoulder at every sample
-  for (let it = 0; it < 40; it++) {
+  // the plan widths are preferences: the base never sits more than BASE_GAP inside the shoulder (a narrow glass house on
+  // a wide body read as a box perched on a tray), and never outside it
+  // In plan the base is one gentle bow (quadratic through the front, middle and rear widths), never a trace of the
+  // shoulder's local bulges and dips: a straight line clamped at narrow ends left the middle far inside a wide body
+  const ROOM = (t) => roomW[Math.round(t * NSB)];
+  const w = [clamp(W0 * c[0], ROOM(0) - BASE_GAP, ROOM(0)), clamp(W0 * (c[0] + c[3]) / 2, ROOM(0.5) - BASE_GAP, ROOM(0.5)), clamp(W0 * c[3], ROOM(1) - BASE_GAP, ROOM(1))];
+  const basis = (t) => [(1 - t) * (1 - 2 * t), 4 * t * (1 - t), t * (2 * t - 1)];
+  const bow = (t) => basis(t).reduce((s, b, i) => s + b * w[i], 0);
+  // least-change fit: the control widths move down along the basis of the worst sample until it clears the shoulder
+  for (let it = 0; it < 60; it++) {
     let worst = 0, tw = 0;
-    xsB.forEach((x, i) => { const t = tOf(x), v = lerp(wa, wc, t) - roomW[i]; if (v > worst) { worst = v; tw = t; } });
+    for (let i = 0; i <= NSB; i++) { const t = i / NSB, v = bow(t) - roomW[i]; if (v > worst) { worst = v; tw = t; } }
     if (worst < 1e-5) break;
-    const nn = (1 - tw) ** 2 + tw ** 2;
-    wa -= (worst * (1 - tw)) / nn; wc -= (worst * tw) / nn;
+    const bs = basis(tw), nn = bs.reduce((s, b) => s + b * b, 0);
+    w.forEach((_, i) => { w[i] -= (worst * bs[i]) / nn; });
   }
-  const baseW = (x) => Math.max(0.08, lerp(wa, wc, tOf(x)));
+  const baseW = (x) => Math.max(0.08, bow(tOf(x)));
   const coveW = clamp(Math.min(...xsB.map((x, i) => roomW[i] + P.ledge - 0.006 - baseW(x))), 0, P.cabinBlend);
   // side view: the beltline under the glass is a straight line (least squares through the deck at the base), and the
   // deck's lateral shape (its crown) is kept relative to it. Only the foot band conforms to the real deck; above it the
@@ -165,11 +183,20 @@ export function buildCabin(P, B) {
   const slopeB = tm.reduce((a, t, i) => a + (t - mt) * (dSide[i] - md), 0) / Math.max(tm.reduce((a, t) => a + (t - mt) ** 2, 0), 1e-9);
   const beltAt = (x) => md + slopeB * (tOf(x) - mt);
   const cleanDeck = (x, lat) => beltAt(x) + deckAt(x, Math.min(lat, baseW(x))) - deckAt(x, baseW(x));
+  // roof width: the plan's, held to a tumblehome between TUMBLE_MIN and TUMBLE_MAX, so the side glass always leans in
+  // like a real greenhouse's (neither a vertical box nor a collapsing tent), whatever widths the plan asks for
   const roofW = (x) => {
-    const t = clamp((x - xRF) / Math.max(xRR - xRF, 1e-3), 0, 1);
-    return Math.min(W0 * lerp(c[1], c[2], t), baseW(x));
+    const t = clamp((x - xRF) / Math.max(xRR - xRF, 1e-3), 0, 1), b = baseW(x);
+    return clamp(W0 * lerp(c[1], c[2], t), b - Hw * Math.tan(TUMBLE_MAX), b - Hw * Math.tan(TUMBLE_MIN));
   };
   const fb = clamp(0.07 / Hw, 0.05, 0.5);
+  // the windshield foot flares forward onto the hood like the side walls flare toward the shoulder (a concave cowl), so
+  // the glass house melts into the hood instead of standing on it in a crisp intersection; the glass starts above it
+  // flare(f): 1 at the foot falling to 0 at the top of the foot band, tangent to the deck at the foot (the wall rises
+  // linearly with f while the flare recedes like (1 - sqrt)^2, so the wall lies down onto the deck) and flat where it ends
+  const flare = (f, band = fb) => (1 - Math.sqrt(clamp(f / band, 0, 1))) ** 2;
+  // the front one is longer and taller (the hood has room): a cowl ramp the windshield rises out of
+  const coveF = 0.06, fbF = clamp(0.11 / Hw, fb, 0.5);
   // the plan turns its front / rear corners under the A / C pillars: a corner arc never exceeds what the pillar covers,
   // so glass stays on the gently curved faces instead of wrapping a tight corner
   const aW = Math.max(P.aPillar, MIN_A), cW = (t) => Math.max(lerp(P.cPillar, P.cPillar * P.cTaper, t), MIN_C);
@@ -184,18 +211,18 @@ export function buildCabin(P, B) {
   const roofCrown = Math.min(P.roofCrown * kW, bowCap(2 * wMidRoof, R_ROOF));
 
   const widthAt = (x, f, inset) => {
-    const b = baseW(x), cove = coveW;
-    const t = clamp(f / fb, 0, 1);
-    return Math.max(0.04, lerp(b, roofW(x), f) + sideBow * Math.sin(Math.PI * f) + cove * (1 - t) * (1 - t) - inset);
+    const b = baseW(x);
+    return Math.max(0.04, lerp(b, roofW(x), f) + sideBow * Math.sin(Math.PI * f) + coveW * flare(f) - inset);
   };
   const slice = (f, inset = 0) => {
     const sn = Math.sin(Math.PI * f), cr = f ** 0.8;
-    const xf = lerp(xA, xRF, f) - bulgeF * sn + inset;
+    const fl = coveF * flare(f, fbF), xf = lerp(xA, xRF, f) - bulgeF * sn + inset - fl;
     const xb = lerp(xC, xRR, f) + bulgeR * sn - inset;
     const Lx = Math.max(0.05, (xb - xf) / 2), Bw = widthAt((xf + xb) / 2, f, inset), wrap = bowCap(2 * Bw, R_WRAP);
     return {
       f, inset, xf, xb, xc: (xf + xb) / 2, Lx, B: Bw,
-      rF: Math.min(lerp(P.baseRound, P.roofRound, f) * Math.min(Lx, Bw), rCapF),
+      // the corner rounds out with the flares at the foot, so the front and side fillets merge round the pillar foot
+      rF: Math.min(lerp(P.baseRound, P.roofRound, f) * Math.min(Lx, Bw), rCapF) + fl + coveW * flare(f),
       rR: Math.min(lerp(P.baseRound, P.roofRound, f) * Math.min(Lx, Bw), rCapR),
       // the wrap is a bow on the glass edge: small next to the half length so a short roof never turns into an oval
       cF: Math.min(P.wsCrown * kW * cr, 0.12 * Lx, wrap), cB: Math.min(P.blCrown * kW * cr, 0.12 * Lx, wrap),
@@ -227,7 +254,7 @@ export function buildCabin(P, B) {
   let prev = add(wall, ring(slice(0), (x, lat) => deckAt(x, lat) - 0.05));
   const wallRings = [];
   for (let k = 0; k <= K; k++) {
-    const f = (k / K) ** 1.4; // levels cluster at the foot where the cove turns
+    const f = (k / K) ** 2; // levels cluster at the foot, evenly along the cove fillet (shaped in sqrt f)
     const r = ring(slice(f), wallY(f));
     wallRings.push(r);
     const ids = add(wall, r); wall.band(prev, ids); prev = ids;
@@ -334,28 +361,44 @@ export function buildCabin(P, B) {
   });
   const pillarFns = pillarAxes.map(([a, b]) => straight((t) => a + b * t));
   const hw = Math.max(P.pillarW, MIN_PILLAR) / 2;
+  // the layout adapts to the glass house: a pillar that would leave a window narrower than MIN_WIN at the sill or the
+  // header is dropped (merging the narrowest window into its smaller neighbour), so a short cabin gets fewer, proper
+  // windows instead of slivers between crowded pillars
+  const winWidths = (fns) => {
+    const cuts = [null, ...fns, null];
+    return cuts.slice(0, -1).map((_, i) => [t0, t1].map((t) => Math.min(front(t), cuts[i] ? cuts[i](t) - hw : Infinity) - Math.max(rear(t), cuts[i + 1] ? cuts[i + 1](t) + hw : -Infinity)));
+  };
+  const active = pillarFns.map((_, i) => i);
+  while (active.length) {
+    const ws = winWidths(active.map((i) => pillarFns[i])), score = ws.map(([a, b]) => Math.min(a / MIN_WIN[0], b / MIN_WIN[1]));
+    const k = score.indexOf(Math.min(...score));
+    if (score[k] >= 1) break;
+    // window k sits between pillar k - 1 (ahead) and pillar k (behind): drop the one shared with the smaller neighbour
+    const drop = k === 0 ? 0 : k === ws.length - 1 ? k - 1 : score[k - 1] < score[k + 1] ? k - 1 : k;
+    active.splice(drop, 1);
+  }
   const sideWins = [];
   if (front(t0) - rear(t0) > 0.2) {
-    const cuts = [null, ...pillarFns, null];
+    const cuts = [null, ...active.map((i) => pillarFns[i]), null];
     for (let i = 0; i < cuts.length - 1; i++) {
       // the opening between the pillar ahead and the pillar behind, sampled up the glass; levels where they meet are dropped
       const span = ts.map((t) => [Math.min(front(t), cuts[i] ? cuts[i](t) - hw : Infinity), Math.max(rear(t), cuts[i + 1] ? cuts[i + 1](t) + hw : -Infinity), t])
         .filter(([sf, sr]) => sf - sr > 0.02);
       if (span.length < 2) continue;
-      const w = chamfer([...span.map(([sf, , t]) => [sf, t]), ...[...span].reverse().map(([, sr, t]) => [sr, t])], 0.03 * dl);
+      const w = roundCorners([...span.map(([sf, , t]) => [sf, t]), ...[...span].reverse().map(([, sr, t]) => [sr, t])], WIN_R, Math.round(6 * dl));
       if (windowOk(w)) sideWins.push(w);
     }
   }
   // windshield / backlight edges are the A / C pillars' far edges, seen from the face charts (f = shared level)
   const faceWin = (face) => {
-    const T = tMax[face], f0 = 0.02, f1 = T - Math.min(P.headerInset * 0.8, 0.2 * T);
+    const T = tMax[face], f0 = face === 'front' ? Math.max(0.02, 0.4 * fbF * T) : 0.02, f1 = T - Math.min(P.headerInset * 0.8, 0.2 * T);
     const half = (tf) => {
       const f = tf / T, t = f * Ts;
       return face === 'front' ? uAt(f, NQ / 2) - front(t) - aW : uAt(f, NQ) - uAt(f, NQ / 2) + rear(t) - cW(f) - Math.max(0.03, cW(f) / 2);
     };
     const tt = Array.from({ length: 6 }, (_, i) => f0 + ((f1 - f0) * i) / 5);
     const poly = [...tt.map((t) => [half(t), t]), ...[...tt].reverse().map((t) => [-half(t), t])];
-    const w = chamfer(poly, 0.05 * dl);
+    const w = roundCorners(poly, 1.5 * WIN_R, Math.round(6 * dl));
     return half(f0) > 0.1 && half(f1) > 0.06 && windowOk(w) ? w : null;
   };
   const shield = faceWin('front'), backlight = faceWin('rear');
@@ -433,7 +476,7 @@ export function buildCabin(P, B) {
     profile, planBase: wallRings[0].map(([x, , lat]) => [x, lat]), planRoof: roofRings[JR - 1].map(([x, , lat]) => [x, lat]),
     sectionAt,
     edit: {
-      t0, t1, Ts, sAtX, front, rear, pillarAxes, toXY,
+      t0, t1, Ts, sAtX, front, rear, pillarAxes, toXY, sideWins, tumble: Math.atan2(widthAt(xMid, 0, 0) - widthAt(xMid, 1, 0), Hw), baseW, roomW: (x) => flatW(x) - P.ledge,
       aLine: lineOf(front), cLine: lineOf(rear), pillarLines, slopeF, slopeR, sA, sC,
     },
   };

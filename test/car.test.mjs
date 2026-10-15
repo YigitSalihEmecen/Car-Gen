@@ -303,12 +303,11 @@ function openEdges({ position: p, index: idx }) {
 }
 
 // fenders rise gradually: along the car the side never slopes in or out faster than 1:1 around the arches (a pinched,
-// near-vertical bulge read as a pulled-up blister), and arch shapes are only round or angular
+// near-vertical bulge read as a pulled-up blister)
 {
   let seed11 = 53;
   const rng11 = () => ((seed11 = (seed11 * 16807) % 2147483647) / 2147483647);
   for (const [name, P] of [...Object.entries(PRESETS).map(([k, p]) => [k, sanitize(clone(p))]), ...Array.from({ length: 12 }, (_, i) => [`random${i}`, randomCar(rng11)])]) {
-    assert.ok(P.archShape === 0 || P.archShape === 1, `${name}: arch shape ${P.archShape} is neither round nor angular`);
     const g = buildCar(P, { detail: 0.6 }), o = g.outline, p = g.position, RL = g.meta.RL, { bf, bc, side } = g.ring, m = g.meta;
     // half width at a fixed height, read off a station's side rows (monotone in height there)
     const widthAt = (i, zt) => {
@@ -332,7 +331,7 @@ function openEdges({ position: p, index: idx }) {
     }
     assert.ok(worst < 1, `${name}: fender flank slopes ${worst.toFixed(2)} along the car`);
   }
-  console.log('ok fenders rise gradually; arches round or angular');
+  console.log('ok fenders rise gradually');
 }
 
 // accessories: every style of every accessory on every preset (and random bodies) builds, stays finite and inside the

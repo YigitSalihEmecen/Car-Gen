@@ -18,7 +18,7 @@ const HOLE_MAX = 256; // per lamp pair; the texture holds the headlight polygon,
 function makePaint() {
   const U = {
     uT: { value: new THREE.Vector4() }, uEnds: { value: new THREE.Vector4() },
-    uWheel: { value: new THREE.Vector4() }, uOpt: { value: new THREE.Vector4() }, uMisc: { value: new THREE.Vector4() },
+    uWheel: { value: new THREE.Vector4() }, uOpt: { value: new THREE.Vector4() },
     uZebra: { value: 0 },
     uHPoly: { value: new THREE.DataTexture(new Float32Array(HOLE_MAX * 8), HOLE_MAX * 2, 1, THREE.RGBAFormat, THREE.FloatType) },
     uHN: { value: 0 }, uHBox: { value: new THREE.Vector4() }, uTN: { value: 0 }, uTBox: { value: new THREE.Vector4() }, uRL: { value: 0 },
@@ -36,7 +36,7 @@ function makePaint() {
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         varying vec3 vOP; varying vec3 vON; varying float vT; varying float vBelt; varying vec2 vIR;
-        uniform vec4 uT, uEnds, uWheel, uOpt, uMisc; uniform float uZebra;
+        uniform vec4 uT, uEnds, uWheel, uOpt; uniform float uZebra;
         uniform sampler2D uHPoly; uniform int uHN, uTN; uniform vec4 uHBox, uTBox; uniform float uRL; uniform vec3 uH3[2], uT3[2];
         // even-odd test against a lamp bezel edge, a polygon in the body's (station, ring) coordinates
         bool inPoly(vec2 p, int off, int n, vec4 box) {
@@ -56,7 +56,7 @@ function makePaint() {
         }
         float aaw(float v){ return fwidth(v) * 0.75 + 1e-5; }
         float above(float v, float a){ float w = aaw(v); return smoothstep(a - w, a + w, v); }
-        float archH(float u){ return uMisc.z > 0.5 ? min(1.0, (1.0 - u) * 2.2) : sqrt(max(1.0 - u * u, 0.0)); }
+        float archH(float u){ return sqrt(max(1.0 - u * u, 0.0)); }
         float inArch(float dx, float y, float ra){ float u = abs(dx) / ra; return (1.0 - above(u, 1.0)) * (1.0 - above(y, uWheel.z + ra * archH(min(u, 1.0)))); }
         float inArches(float x, float y, float ra){ return max(inArch(x, y, ra), inArch(x - uWheel.y, y, ra)); }`)
       .replace('#include <color_fragment>', `#include <color_fragment>
@@ -198,7 +198,6 @@ export class CarMesh {
     U.uEnds.value.set(m.xF, m.xR, m.W0, P.clearance);
     U.uWheel.value.set(0, m.wb, m.R, m.Ra);
     U.uOpt.value.set(P.cladding, P.contrastRoof, 0, 0);
-    U.uMisc.value.set(0, 0, P.archShape, 0);
     M.paint.color.set(P.color);
     M.paint.metalness = P.metal; M.paint.roughness = P.rough;
 

@@ -25,7 +25,7 @@ export const SPEC = [
   ['Surface', [['squareness', 'Section squareness', 2.2, 12, 0.1], ['edgeR', 'Shoulder radius', 0.005, 0.3, 0.005, 'm'], 
     ['bottomR', 'Sill radius', 0.005, 0.25, 0.005, 'm'], ['crown', 'Roof / hood crown', -0.02, 0.12, 0.002, 'm'], ['softness', 'Line softness', 0.002, 0.12, 0.001, 'm']]],
   ['Character', [['tension', 'Line tension', 0, 1, 0.01], ['creaseSharp', 'Crease sharpness', 0, 1, 0.01], ['ledgeSharp', 'Ledge sharpness', 0, 1, 0.01],
-    ['archShape', 'Arch shape', 0, 1, 1], ['ridge', 'Center ridge', 0, 0.06, 0.001, 'm']]],
+    ['ridge', 'Center ridge', 0, 0.06, 0.001, 'm']]],
   ['Sculpt', [['crease', 'Character crease', 0, 0.03, 0.001, 'm'], ['flare', 'Front fender flare', 0, 0.15, 0.002, 'm'], ['flareR', 'Rear fender flare', 0, 0.15, 0.002, 'm'], ['fenderMelt', 'Fender blend', 1.2, 2.8, 0.05], ['archLip', 'Arch lip', 0, 0.03, 0.001, 'm'],
     ['ledge', 'Shoulder ledge', 0, 0.08, 0.002, 'm'], ['hoodDome', 'Hood dome', 0, 0.06, 0.001, 'm'], ['peakF', 'Front fender peaks', 0, 0.12, 0.002, 'm'], ['peakR', 'Rear fender peaks', 0, 0.12, 0.002, 'm']]],
   ['Greenhouse', [['pillarCount', 'Side pillars', 0, 3, 1], ['pillarFan', 'Pillar fan', 0, 1, 0.01], ['pillarW', 'Side pillar width', 0.05, 0.2, 0.005, 'm'],
@@ -64,7 +64,7 @@ export const TAB = (group) => (ATTACH.has(group) ? 'attachments' : 'body');
 
 export const OPTIONS = {
   hlType: LAMP_TYPES, tlType: TAIL_TYPES, fdType: FENDER_TYPES, rimType: RIM_TYPES, rfType: ROOF_TYPES, plateType: PLATE_TYPES, exType: EXHAUST_TYPES, spType: SPOILER_TYPES, mrType: MIRROR_TYPES, anType: ANTENNA_TYPES, grType: GRILLE_TYPES, hdType: HOOD_TYPES,
-  archShape: ['Round', 'Angular'], kitF: KIT_TYPES, kitS: KIT_TYPES, kitR: KIT_TYPES,
+  kitF: KIT_TYPES, kitS: KIT_TYPES, kitR: KIT_TYPES,
 };
 
 // flat list: { key, label, min, max, step, unit, group, tab, options? }. `pillarCount` is virtual (P.pillars.length,

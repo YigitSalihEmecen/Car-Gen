@@ -87,7 +87,10 @@ export function buildRoof(P, cabin, detail = 1) {
     return w;
   };
   const xc = (rx0 + rx1) / 2, Lr = P.rfLen * (rx1 - rx0) * 0.9;
-  const xs = [xc - 0.4 * Lr, xc + 0.4 * Lr];
+  // feet move in from the ends until the roof under both of them is within ~16 deg of level: a pad tilted to a steep
+  // roof roll hangs its low corner well below the foot
+  const level = (x) => [-1, 1].every((s) => (castDown(cabin.roof, x, s * halfAt(x) * P.rfWidth * 0.94)?.n[1] ?? 0) > 0.96);
+  const xs = [xc - 0.4 * Lr, xc + 0.4 * Lr].map((x) => { for (let i = 0; i < 12 && !level(x); i++) x = lerp(x, xc, 0.15); return x; });
   const zF = Math.min(...xs.map((x) => halfAt(x))) * P.rfWidth * 0.94;
   if (zF < 0.15 || Lr < 0.18) return null;
   const feet = [];
