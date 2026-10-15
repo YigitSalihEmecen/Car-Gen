@@ -200,6 +200,8 @@ export class CarMesh {
     U.uOpt.value.set(P.cladding, P.contrastRoof, 0, 0);
     M.paint.color.set(P.color);
     M.paint.metalness = P.metal; M.paint.roughness = P.rough;
+    // lacquer only on a glossy finish: a full clearcoat over matte paint still mirrors the sky
+    M.paint.clearcoat = Math.max(0, 1 - P.rough / 0.6);
 
     // cabin: painted wall, roof (paint or the contrast colour), glass on gaskets
     const cab = built.cabin;
