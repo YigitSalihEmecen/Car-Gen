@@ -51,6 +51,15 @@ const body = a.body, fl = a.wheels.FL;
 a.update({ ...PRESETS.suv, rimType: 3 });
 assert.ok(a.body === body && a.wheels.FL === fl && a.metrics.wheelRadius === PRESETS.suv.wheelR, 'update() replaced the objects');
 
+// metrics describe the shell: bolt-on accessories (mirrors, masts, wings, tips, plates) never resize it
+const bare = { ...PRESETS.wagon, plateType: 0, exType: 0, spType: 0, mrType: 0, anType: 0, grType: 0, hdType: 0 };
+const full = { ...PRESETS.wagon, plateType: 1, exType: 1, spType: 4, mrType: 1, anType: 2, anLen: 1, grType: 1, hdType: 1 };
+const mb = createCar(bare, { detail: 0 }).metrics, mf = createCar(full, { detail: 0 }).metrics;
+for (const k of ['bodyHeight', 'bodyHalfWidth', 'bodyFrontZ', 'bodyRearZ']) assert.ok(Math.abs(mb[k] - mf[k]) < 1e-6, `accessories changed metrics.${k}: ${mb[k]} -> ${mf[k]}`);
+// a part switched off is hidden with its old geometry; it must not stay in the box
+const c = createCar(full, { detail: 0 }).update(bare);
+assert.ok(Math.abs(c.metrics.bodyHalfWidth - mb.bodyHalfWidth) < 1e-6, 'hidden parts still measured');
+
 // schema covers the editor's parameters, with option names for the discrete ones
 assert.ok(PARAMS.length > 90 && PARAMS.every((p) => p.key && p.label && p.min < p.max), 'parameter schema incomplete');
 assert.deepEqual(PARAMS.find((p) => p.key === 'rimType').options.length, 5);

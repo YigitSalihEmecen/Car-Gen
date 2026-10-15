@@ -10,7 +10,7 @@
 // which spins about its local X. Position holders at (+-trackHalf, wheelRadius, +-wheelbaseHalf), FL = (-, -).
 import * as THREE from 'three';
 import { PRESETS, randomCar, sanitize, clone, setPillarCount, buildCar, seeded, randomParams } from './car.js';
-import { CarMesh, createMaterials } from './render.js';
+import { CarMesh, createMaterials, ACCESSORIES } from './render.js';
 import { SPEC, PARAMS, OPTIONS } from './params.js';
 
 export { PRESETS, randomCar, sanitize, clone, setPillarCount, buildCar, seeded, randomParams, CarMesh, createMaterials, SPEC, PARAMS, OPTIONS };
@@ -18,6 +18,7 @@ export { PRESETS, randomCar, sanitize, clone, setPillarCount, buildCar, seeded, 
 // lamp emissive levels, matched to HighRoads' own: dim running glow, braking / main beam, flash
 const TAIL_IDLE = 0.8, TAIL_BRAKE = 5.5, HEAD_OFF = 0.5, HEAD_ON = 3.2, HEAD_FLASH = 9;
 const WHEELS = ['FL', 'FR', 'BL', 'BR'];
+const BOLT_ON = new RegExp(`^(${ACCESSORIES.join('|')})_`);
 const parse = (input) => (input && typeof input === 'object' ? sanitize(clone(input)) : PRESETS[input] ? sanitize(clone(PRESETS[input])) : randomParams(input ?? Math.random()));
 
 /**
@@ -53,9 +54,11 @@ export function createCar(input, { detail = 0.5 } = {}) {
       if (view.wheelProto !== prevProto) {
         for (const k of WHEELS) { spinners[k].clear(); spinners[k].add(view.wheelProto.clone()); }
       }
-      // metrics in the game frame, measured from the actual meshes (wheels excluded)
+      // metrics in the game frame, measured from the shell: wheels and bolt-on accessories (a mirror, a mast, a wing)
+      // excluded, since a host sizes colliders and mass from them; hidden parts keep stale geometry, so skip those too
       body.updateMatrixWorld(true);
-      const box = new THREE.Box3().setFromObject(body, true);
+      const box = new THREE.Box3();
+      for (const [name, mesh] of Object.entries(view.parts)) if (mesh.visible && !BOLT_ON.test(name)) box.expandByObject(mesh, true);
       car.metrics = {
         trackHalf: P.track / 2 + P.wheelPoke,
         wheelbaseHalf: P.wheelbase / 2,
